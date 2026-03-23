@@ -187,17 +187,21 @@ fn decode_mysql_value(
     use sqlx::Row as _;
     let upper = type_name.to_uppercase();
 
-    // Integer families (try signed, then unsigned, then bool for TINYINT(1))
+    // Integer families — sqlx MySQL requires the exact Rust type per variant:
+    //   TINYINT→i8, SMALLINT→i16, MEDIUMINT/INT→i32, BIGINT→i64 (and unsigned equivalents).
+    // We try from smallest to largest; sqlx returns Err on a type mismatch so the
+    // first successful decode is the right one.
     if upper.contains("INT") || upper == "YEAR" {
-        if let Ok(Some(v)) = row.try_get::<Option<i64>, _>(idx) {
-            return Value::Integer(v);
-        }
-        if let Ok(Some(v)) = row.try_get::<Option<u64>, _>(idx) {
-            return Value::Integer(v as i64);
-        }
-        if let Ok(Some(v)) = row.try_get::<Option<bool>, _>(idx) {
-            return Value::Integer(v as i64);
-        }
+        if let Ok(Some(v)) = row.try_get::<Option<i8>,  _>(idx) { return Value::Integer(v as i64); }
+        if let Ok(Some(v)) = row.try_get::<Option<u8>,  _>(idx) { return Value::Integer(v as i64); }
+        if let Ok(Some(v)) = row.try_get::<Option<i16>, _>(idx) { return Value::Integer(v as i64); }
+        if let Ok(Some(v)) = row.try_get::<Option<u16>, _>(idx) { return Value::Integer(v as i64); }
+        if let Ok(Some(v)) = row.try_get::<Option<i32>, _>(idx) { return Value::Integer(v as i64); }
+        if let Ok(Some(v)) = row.try_get::<Option<u32>, _>(idx) { return Value::Integer(v as i64); }
+        if let Ok(Some(v)) = row.try_get::<Option<i64>, _>(idx) { return Value::Integer(v); }
+        if let Ok(Some(v)) = row.try_get::<Option<u64>, _>(idx) { return Value::Integer(v as i64); }
+        if let Ok(Some(v)) = row.try_get::<Option<bool>, _>(idx) { return Value::Integer(v as i64); }
+        warn_unsupported_type(type_name);
         return Value::Null;
     }
 
@@ -211,9 +215,10 @@ fn decode_mysql_value(
     }
 
     if upper.contains("FLOAT") || upper.contains("DOUBLE") {
-        if let Ok(Some(v)) = row.try_get::<Option<f64>, _>(idx) {
-            return Value::Float(v);
-        }
+        // FLOAT → f32, DOUBLE → f64 in sqlx MySQL; try both so either works.
+        if let Ok(Some(v)) = row.try_get::<Option<f32>, _>(idx) { return Value::Float(v as f64); }
+        if let Ok(Some(v)) = row.try_get::<Option<f64>, _>(idx) { return Value::Float(v); }
+        warn_unsupported_type(type_name);
         return Value::Null;
     }
 
@@ -225,12 +230,13 @@ fn decode_mysql_value(
             }
             return Value::Text(s);
         }
+        warn_unsupported_type(type_name);
         return Value::Null;
     }
 
-    // Pure binary blobs (BLOB, LONGBLOB, MEDIUMBLOB, TINYBLOB — but not VARBINARY which
-    // is often used for text in MySQL information_schema)
-    if upper.contains("BLOB") || (upper.contains("BINARY") && !upper.contains("VAR")) {
+    // Pure binary blobs (BLOB, LONGBLOB, MEDIUMBLOB, TINYBLOB) and fixed BINARY(n).
+    // VARBINARY is also handled here — it decodes as Vec<u8> in sqlx, not String.
+    if upper.contains("BLOB") || upper.contains("BINARY") {
         if let Ok(Some(v)) = row.try_get::<Option<Vec<u8>>, _>(idx) {
             return match String::from_utf8(v.clone()) {
                 Ok(s) => Value::Text(s),
@@ -255,5 +261,18 @@ fn decode_mysql_value(
         };
     }
 
+    warn_unsupported_type(type_name);
     Value::Null
+}
+
+/// Emit a one-time stderr warning for an unsupported MySQL type.
+fn warn_unsupported_type(type_name: &str) {
+    use std::collections::HashSet;
+    use std::sync::Mutex;
+    static WARNED: Mutex<Option<HashSet<String>>> = Mutex::new(None);
+    let mut guard = WARNED.lock().unwrap();
+    let seen = guard.get_or_insert_with(HashSet::new);
+    if seen.insert(type_name.to_string()) {
+        eprintln!("WARNING: unsupported MySQL type '{}' — displayed as NULL", type_name);
+    }
 }
