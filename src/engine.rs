@@ -84,8 +84,8 @@ impl Engine {
         Ok(count)
     }
 
-    /// Execute a relation rule along a specific path. For each existing root
-    /// node that belongs to `from_table`, follow the path and attach child
+    /// Execute a relation rule along a specific path. For each existing node in
+    /// the tree that belongs to `from_table`, follow the path and attach child
     /// nodes (fetching any missing intermediate/target rows).
     pub async fn apply_relation_rule(
         &mut self,
@@ -95,29 +95,12 @@ impl Engine {
         if path.steps.is_empty() {
             return Ok(0);
         }
-        let mut total = 0;
-        // We iterate over root indices to avoid borrow issues
-        let n = self.roots.len();
-        for i in 0..n {
-            if self.roots[i].table == path.steps[0].from_table {
-                let added = self
-                    .attach_path(db, i, path, 0)
-                    .await?;
-                total += added;
-            }
+        let mut total = 0usize;
+        let from_table = path.steps[0].from_table.clone();
+        for root in &mut self.roots {
+            total += attach_path_for_matching_nodes(db, root, &from_table, path, 0).await?;
         }
         Ok(total)
-    }
-
-    /// Attach path steps to a root node, recursively traversing all steps.
-    async fn attach_path(
-        &mut self,
-        db: &dyn Database,
-        node_idx: usize,
-        path: &TablePath,
-        step_idx: usize,
-    ) -> Result<usize> {
-        attach_path_to_node(db, &mut self.roots[node_idx], path, step_idx).await
     }
 
     /// Execute a rule (dispatching to filter or relation).
@@ -188,6 +171,25 @@ impl Engine {
         }
         Ok(())
     }
+}
+
+fn attach_path_for_matching_nodes<'a>(
+    db: &'a dyn Database,
+    node: &'a mut DataNode,
+    from_table: &'a str,
+    path: &'a TablePath,
+    step_idx: usize,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<usize>> + 'a>> {
+    Box::pin(async move {
+        let mut total = 0usize;
+        if node.table == from_table {
+            total += attach_path_to_node(db, node, path, step_idx).await?;
+        }
+        for child in &mut node.children {
+            total += attach_path_for_matching_nodes(db, child, from_table, path, step_idx).await?;
+        }
+        Ok(total)
+    })
 }
 
 /// Recursively attach path steps starting at `step_idx` to `node`, fetching
@@ -391,20 +393,41 @@ mod tests {
         );
     }
 
-    /// Create an in-memory SQLite database with a 3-table schema mirroring the
-    /// users → orders → order_items → products chain.
+    /// Create an in-memory SQLite database with users/orders/products and
+    /// departments -> users, users -> products relations.
     async fn setup_test_db() -> crate::db::sqlite::SqliteDb {
         use sqlx::SqlitePool;
         let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
         let stmts = [
-            "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL)",
+            "CREATE TABLE departments (id INTEGER PRIMARY KEY, name TEXT NOT NULL)",
+            "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL, department_id INTEGER NOT NULL REFERENCES departments(id))",
             "CREATE TABLE orders (id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id))",
             "CREATE TABLE products (id INTEGER PRIMARY KEY, name TEXT NOT NULL)",
             "CREATE TABLE order_items (id INTEGER PRIMARY KEY, order_id INTEGER NOT NULL REFERENCES orders(id), product_id INTEGER NOT NULL REFERENCES products(id))",
-            "INSERT INTO users VALUES (1, 'Alice'), (2, 'Bob')",
-            "INSERT INTO orders VALUES (10, 1), (11, 2)",
+            "INSERT INTO departments VALUES (1, 'Engineering'), (2, 'Sales')",
+            "INSERT INTO users VALUES (1, 'Alice', 1), (2, 'Bob', 2)",
             "INSERT INTO products VALUES (100, 'Widget'), (101, 'Gadget')",
+            "INSERT INTO orders VALUES (10, 1), (11, 2)",
             "INSERT INTO order_items VALUES (1000, 10, 100), (1001, 11, 101)",
+        ];
+        for stmt in &stmts {
+            sqlx::query(stmt).execute(&pool).await.unwrap();
+        }
+        crate::db::sqlite::SqliteDb::from_pool(pool)
+    }
+
+    /// Dedicated DB for departments -> users -> products tests with an
+    /// unambiguous users -> products path.
+    async fn setup_departments_users_products_db() -> crate::db::sqlite::SqliteDb {
+        use sqlx::SqlitePool;
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        let stmts = [
+            "CREATE TABLE departments (id INTEGER PRIMARY KEY, name TEXT NOT NULL)",
+            "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL, department_id INTEGER NOT NULL REFERENCES departments(id), favorite_product_id INTEGER NOT NULL REFERENCES products(id))",
+            "CREATE TABLE products (id INTEGER PRIMARY KEY, name TEXT NOT NULL)",
+            "INSERT INTO departments VALUES (1, 'Engineering'), (2, 'Sales')",
+            "INSERT INTO products VALUES (100, 'Widget'), (101, 'Gadget')",
+            "INSERT INTO users VALUES (1, 'Alice', 1, 100), (2, 'Bob', 2, 101)",
         ];
         for stmt in &stmts {
             sqlx::query(stmt).execute(&pool).await.unwrap();
@@ -542,6 +565,31 @@ mod tests {
         assert_eq!(
             restored_sig, baseline_sig,
             "restored response should match original baseline response"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_departments_users_products_sequence_reaches_nested_users() {
+        let db = setup_departments_users_products_db().await;
+        let schema = crate::schema::Schema::explore(&db).await.unwrap();
+        let mut engine = Engine::new(schema);
+
+        let rule_departments = rules::parse_rule("departments").unwrap();
+        let rule_departments_users = rules::parse_rule("departments to users").unwrap();
+        let rule_users_products = rules::parse_rule("users to products").unwrap();
+
+        engine.execute_rule(&db, rule_departments).await.unwrap();
+        engine.execute_rule(&db, rule_departments_users).await.unwrap();
+        engine.execute_rule(&db, rule_users_products).await.unwrap();
+
+        let sig = tree_signature(&engine.roots);
+        assert!(
+            sig.iter().any(|s| s.contains(":users#")),
+            "departments to users should attach users"
+        );
+        assert!(
+            sig.iter().any(|s| s.contains(":products#")),
+            "users to products should reach users nested under departments"
         );
     }
 }
