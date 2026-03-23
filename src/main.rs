@@ -1,3 +1,4 @@
+mod config;
 mod db;
 mod engine;
 mod rules;
@@ -46,6 +47,9 @@ async fn main() -> Result<()> {
     let mut engine = Engine::new(schema);
     let mut state = AppState::new();
     state.table_names = table_names;
+    let defaults = config::load_column_defaults(&std::env::current_dir()?)?;
+    state.default_visible_columns = defaults.global;
+    state.default_visible_columns_by_table = defaults.per_table;
 
     // Set up terminal
     enable_raw_mode()?;
@@ -152,15 +156,17 @@ fn columns_for_table(roots: &[engine::DataNode], table: &str) -> Vec<String> {
 }
 
 fn ensure_tree_visibility_for_node(state: &mut AppState, node: &engine::DataNode) {
-    fn default_tree_columns(node: &engine::DataNode) -> Vec<String> {
+    fn default_tree_columns(
+        configured_defaults: &[String],
+        node: &engine::DataNode,
+    ) -> Vec<String> {
         let mut all_cols: Vec<String> = node.row.keys().cloned().collect();
         all_cols.sort();
-        let preferred = ["id", "name", "title", "label"];
-        let mut visible: Vec<String> = preferred
+        let mut visible: Vec<String> = configured_defaults
             .iter()
             .filter_map(|c| {
                 if all_cols.iter().any(|k| k == c) {
-                    Some((*c).to_string())
+                    Some(c.clone())
                 } else {
                     None
                 }
@@ -172,17 +178,22 @@ fn ensure_tree_visibility_for_node(state: &mut AppState, node: &engine::DataNode
         visible
     }
 
+    let configured_defaults = state
+        .configured_defaults_for_table(&node.table)
+        .to_vec();
+    let default_cols = default_tree_columns(&configured_defaults, node);
+
     state
         .tree_visible_columns
         .entry(node.table.clone())
-        .or_insert_with(|| default_tree_columns(node));
+        .or_insert_with(|| default_cols.clone());
     state
         .tree_column_order
         .entry(node.table.clone())
         .or_insert_with(|| {
             let mut all_cols: Vec<String> = node.row.keys().cloned().collect();
             all_cols.sort();
-            let defaults = default_tree_columns(node);
+            let defaults = default_cols.clone();
             let default_set: std::collections::HashSet<String> =
                 defaults.iter().cloned().collect();
 

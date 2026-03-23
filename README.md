@@ -158,6 +158,35 @@ Press `r` to open the rule list.  Use `u` / `d` to swap a rule up or down, then 
 
 ---
 
+## Configuration
+
+ArborQL loads Jsonnet config from `.arborql/config.jsonnet` using this precedence:
+
+1. `~/.arborql/config.jsonnet`
+2. then `.arborql/config.jsonnet` discovered from the current directory upward, stopping at your home directory
+3. later (nearer) files override earlier ones
+
+Example:
+
+```jsonnet
+{
+  columns: {
+    // Global default columns for tree rows
+    default: ["id", "name"],
+
+    // Table-specific overrides
+    tables: {
+      users: { default: ["id", "email"] },
+      orders: { default: ["id", "status"] },
+    },
+  },
+}
+```
+
+If no config is found, ArborQL defaults to `["id", "name"]`.
+
+---
+
 ## Project layout
 
 ```
@@ -185,4 +214,3 @@ sample/
 
 Bug reports and pull requests are welcome on GitHub.  
 Please open an issue first for larger feature ideas.
-

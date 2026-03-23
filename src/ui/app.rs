@@ -63,6 +63,10 @@ pub struct AppState {
     pub tree_column_order: HashMap<String, Vec<String>>,
     /// Column manager mode: table, editable list (ordered + enabled), cursor.
     pub column_add: Option<(String, Vec<ColumnManagerItem>, usize)>,
+    /// Config-driven default visible columns.
+    pub default_visible_columns: Vec<String>,
+    /// Config-driven table-specific default visible columns.
+    pub default_visible_columns_by_table: HashMap<String, Vec<String>>,
 }
 
 impl AppState {
@@ -86,7 +90,15 @@ impl AppState {
             tree_visible_columns: HashMap::new(),
             tree_column_order: HashMap::new(),
             column_add: None,
+            default_visible_columns: vec!["id".to_string(), "name".to_string()],
+            default_visible_columns_by_table: HashMap::new(),
         }
+    }
+
+    pub fn configured_defaults_for_table(&self, table: &str) -> &[String] {
+        self.default_visible_columns_by_table
+            .get(table)
+            .unwrap_or(&self.default_visible_columns)
     }
 
     /// Move selection up.

@@ -115,12 +115,12 @@ fn render_data_viewer(
                 .get(&node.table)
                 .cloned()
                 .unwrap_or_else(|| {
-                    let preferred = ["id", "name", "title", "label"];
-                    let mut cols: Vec<String> = preferred
+                    let mut cols: Vec<String> = state
+                        .configured_defaults_for_table(&node.table)
                         .iter()
                         .filter_map(|c| {
                             if default_cols.iter().any(|k| k == c) {
-                                Some((*c).to_string())
+                                Some(c.clone())
                             } else {
                                 None
                             }
