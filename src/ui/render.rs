@@ -121,34 +121,21 @@ fn render_data_viewer(
                 .get(&node.table)
                 .cloned()
                 .unwrap_or_else(|| {
-                    let mut cols: Vec<String> = state
+                    state
                         .configured_defaults_for_table(&node.table)
                         .iter()
-                        .filter_map(|c| {
-                            if default_cols.iter().any(|k| k == c) {
-                                Some(c.clone())
-                            } else {
-                                None
-                            }
-                        })
-                        .collect();
-                    if cols.is_empty() && !default_cols.is_empty() {
-                        cols.push(default_cols[0].clone());
-                    }
-                    cols
+                        .filter(|c| default_cols.iter().any(|k| k == *c))
+                        .cloned()
+                        .collect()
                 });
-            let summary = if summary_cols.is_empty() {
-                node.summary()
-            } else {
-                let parts: Vec<String> = summary_cols
-                    .iter()
-                    .map(|c| {
-                        let v = node.row.get(c).map(|v| v.to_string()).unwrap_or_default();
-                        format!("{}: {}", c, v)
-                    })
-                    .collect();
-                parts.join("  │  ")
-            };
+            let summary = summary_cols
+                .iter()
+                .map(|c| {
+                    let v = node.row.get(c).map(|v| v.to_string()).unwrap_or_default();
+                    format!("{}: {}", c, v)
+                })
+                .collect::<Vec<_>>()
+                .join("  │  ");
             let table_label = format!("[{}]", node.table);
             let line = Line::from(vec![
                 Span::raw(indent),

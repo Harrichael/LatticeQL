@@ -14,7 +14,7 @@ pub struct ColumnDefaults {
 impl Default for ColumnDefaults {
     fn default() -> Self {
         Self {
-            global: vec!["id".to_string(), "name".to_string()],
+            global: vec![],
             per_table: HashMap::new(),
         }
     }
@@ -141,7 +141,7 @@ mod tests {
     #[test]
     fn defaults_for_table_falls_back_to_global() {
         let cfg = ColumnDefaults::default();
-        assert_eq!(cfg.for_table("users"), &vec!["id".to_string(), "name".to_string()]);
+        assert_eq!(cfg.for_table("users"), &Vec::<String>::new());
     }
 
     #[test]

@@ -134,7 +134,7 @@ impl AppState {
             tree_visible_columns: HashMap::new(),
             tree_column_order: HashMap::new(),
             column_add: None,
-            default_visible_columns: vec!["id".to_string(), "name".to_string()],
+            default_visible_columns: vec![],
             default_visible_columns_by_table: HashMap::new(),
             virtual_fks: Vec::new(),
         }

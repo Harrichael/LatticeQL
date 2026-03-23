@@ -178,9 +178,6 @@ fn ensure_tree_visibility_for_node(state: &mut AppState, node: &engine::DataNode
                 }
             })
             .collect();
-        if visible.is_empty() && !all_cols.is_empty() {
-            visible.push(all_cols[0].clone());
-        }
         visible
     }
 
