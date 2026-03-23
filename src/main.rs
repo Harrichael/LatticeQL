@@ -46,6 +46,11 @@ async fn main() -> Result<()> {
     let mut engine = Engine::new(schema);
     let mut state = AppState::new();
     state.table_names = table_names;
+    // Build per-table column lists for command completion hints.
+    state.table_columns = engine.schema.tables.iter().map(|(name, info)| {
+        let cols = info.columns.iter().map(|c| c.name.clone()).collect();
+        (name.clone(), cols)
+    }).collect();
 
     // Set up terminal
     enable_raw_mode()?;

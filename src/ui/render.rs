@@ -1,4 +1,5 @@
 use crate::engine::{flatten_tree, DataNode};
+use crate::rules::{completions_at, Completion};
 use crate::ui::app::{AppState, Mode};
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
@@ -23,10 +24,12 @@ pub fn render(f: &mut Frame, state: &mut AppState, roots: &[DataNode]) {
         (None, size)
     };
 
-    // Split main_area into data viewer + command bar
+    // Split main_area into data viewer + command bar.
+    // In Command mode we use an extra row to show next-token hints.
+    let cmd_height: u16 = if state.mode == Mode::Command { 4 } else { 3 };
     let vert = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Min(3), Constraint::Length(3)])
+        .constraints([Constraint::Min(3), Constraint::Length(cmd_height)])
         .split(main_area);
 
     let viewer_area = vert[0];
@@ -216,36 +219,69 @@ fn render_data_viewer(
 }
 
 fn render_command_bar(f: &mut Frame, state: &AppState, area: Rect) {
-    let (title, hint) = match &state.mode {
-        Mode::Command => (
-            " Command ",
-            " Enter command • Esc: cancel",
-        ),
-        Mode::Normal => (
-            " ArborQL ",
-            " ':' command  'j/k' navigate  'f' fold  's' schema  'c' add column  'r' reorder  'q' quit",
-        ),
-        _ => (" ArborQL ", ""),
-    };
-
-    let display = match &state.mode {
-        Mode::Command => format!(":{}", state.input),
-        _ => hint.to_string(),
-    };
-
-    let block = Block::default().title(title).borders(Borders::ALL);
-    let para = Paragraph::new(display)
-        .block(block)
-        .style(Style::default().fg(Color::White));
-    f.render_widget(para, area);
-
-    // Show cursor in command mode
     if state.mode == Mode::Command {
+        let block = Block::default().title(" Command ").borders(Borders::ALL);
+        let inner = block.inner(area);
+        f.render_widget(block, area);
+
+        // Split inner into: command input line | next-token hint line.
+        let rows = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(1), Constraint::Length(1)])
+            .split(inner);
+
+        // Input line
+        let cmd_para = Paragraph::new(format!(":{}", state.input))
+            .style(Style::default().fg(Color::White));
+        f.render_widget(cmd_para, rows[0]);
+
+        // Completion hint line
+        let completions = completions_at(&state.input, &state.table_names, &state.table_columns);
+        if !completions.is_empty() {
+            let hint = format_completions(&completions);
+            let hint_para = Paragraph::new(hint)
+                .style(Style::default().fg(Color::DarkGray));
+            f.render_widget(hint_para, rows[1]);
+        }
+
+        // Place the cursor on the input line.
         f.set_cursor_position((
             area.x + 1 + 1 + state.cursor as u16, // +1 border, +1 for ':'
             area.y + 1,
         ));
+    } else {
+        let (title, display) = match &state.mode {
+            Mode::Normal => (
+                " ArborQL ",
+                " ':' command  'j/k' navigate  'f' fold  's' schema  'c' add column  'r' reorder  'q' quit",
+            ),
+            _ => (" ArborQL ", ""),
+        };
+        let block = Block::default().title(title).borders(Borders::ALL);
+        let para = Paragraph::new(display)
+            .block(block)
+            .style(Style::default().fg(Color::White));
+        f.render_widget(para, area);
     }
+}
+
+/// Format a list of completions into a single hint string, capped at 8 items.
+fn format_completions(completions: &[Completion]) -> String {
+    const MAX_SHOW: usize = 8;
+    let total = completions.len();
+    let parts: Vec<String> = completions
+        .iter()
+        .take(MAX_SHOW)
+        .map(|c| match c {
+            Completion::Token(s) => s.clone(),
+            Completion::QuotedValue => "'<value>'".to_string(),
+        })
+        .collect();
+    let mut text = format!(" {}", parts.join("  ·  "));
+    if total > MAX_SHOW {
+        text.push_str(&format!("  +{} more", total - MAX_SHOW));
+    }
+    text
 }
 
 fn render_path_selection(f: &mut Frame, state: &AppState) {

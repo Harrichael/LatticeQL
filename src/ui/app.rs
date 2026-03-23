@@ -57,6 +57,8 @@ pub struct AppState {
     pub rule_reorder_redo: Vec<(Vec<Rule>, usize, usize)>,
     /// Whether to show the schema sidebar.
     pub show_schema: bool,
+    /// Column names per table, for command completion hints.
+    pub table_columns: HashMap<String, Vec<String>>,
     /// Tree-level visible columns by table.
     pub tree_visible_columns: HashMap<String, Vec<String>>,
     /// Full tree-level column ordering by table (enabled + disabled).
@@ -83,6 +85,7 @@ impl AppState {
             rule_reorder_undo: Vec::new(),
             rule_reorder_redo: Vec::new(),
             show_schema: false,
+            table_columns: HashMap::new(),
             tree_visible_columns: HashMap::new(),
             tree_column_order: HashMap::new(),
             column_add: None,
