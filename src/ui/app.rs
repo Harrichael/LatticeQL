@@ -56,6 +56,8 @@ pub enum Mode {
     VirtualFkManager { cursor: usize },
     /// User is stepping through the virtual FK creation wizard.
     VirtualFkAdd(VirtualFkAddStep),
+    /// User is viewing the internal log history.
+    LogViewer { cursor: usize },
 }
 
 /// Working item in column manager overlay.
@@ -112,6 +114,8 @@ pub struct AppState {
     pub default_visible_columns_by_table: HashMap<String, Vec<String>>,
     /// Virtual FK definitions managed by the user.
     pub virtual_fks: Vec<VirtualFkDef>,
+    /// Internal log history (warnings, errors, info messages).
+    pub logs: Vec<crate::log::LogEntry>,
 }
 
 impl AppState {
@@ -140,6 +144,7 @@ impl AppState {
             default_visible_columns: vec![],
             default_visible_columns_by_table: HashMap::new(),
             virtual_fks: Vec::new(),
+            logs: Vec::new(),
         }
     }
 

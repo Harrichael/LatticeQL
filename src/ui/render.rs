@@ -4,7 +4,7 @@ use crate::ui::app::{AppState, Mode, VirtualFkAddStep};
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
-    text::{Line, Span},
+    text::{Line, Span, Text},
     widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Wrap},
     Frame,
 };
@@ -52,6 +52,7 @@ pub fn render(f: &mut Frame, state: &mut AppState, roots: &[DataNode]) {
         Mode::RuleReorder => render_rule_reorder(f, state),
         Mode::VirtualFkManager { .. } => render_virtual_fk_manager(f, state),
         Mode::VirtualFkAdd(_) => render_virtual_fk_add(f, state),
+        Mode::LogViewer { .. } => render_log_viewer(f, state),
         Mode::Error(msg) => {
             let msg = msg.clone();
             render_overlay_message(f, &format!("Error: {}", msg), Color::Red);
@@ -240,14 +241,27 @@ fn render_command_bar(f: &mut Frame, state: &AppState, area: Rect) {
             area.y + 1,
         ));
     } else {
+        let has_warn_or_error = state.logs.iter().any(|e| {
+            matches!(e.level, crate::log::LogLevel::Warn | crate::log::LogLevel::Error)
+        });
+        let alert = if has_warn_or_error { " ⚠ " } else { "" };
         let (title, display) = match &state.mode {
             Mode::Normal => (
                 " LatticeQL ",
-                " ':' command  'j/k' navigate  'f' fold  's' schema  'c' columns  'v' virtual FKs  'r' reorder  'q' quit",
+                " ':' command  'j/k' navigate  'f' fold  's' schema  'c' columns  'v' virtual FKs  'r' reorder  'l' logs  'q' quit",
             ),
             _ => (" LatticeQL ", ""),
         };
-        let block = Block::default().title(title).borders(Borders::ALL);
+        let full_title = format!("{}{}", alert, title);
+        let title_style = if has_warn_or_error {
+            Style::default().fg(Color::Yellow)
+        } else {
+            Style::default().fg(Color::White)
+        };
+        let block = Block::default()
+            .title(full_title)
+            .title_style(title_style)
+            .borders(Borders::ALL);
         let para = Paragraph::new(display)
             .block(block)
             .style(Style::default().fg(Color::White));
@@ -292,11 +306,34 @@ fn render_path_selection(f: &mut Frame, state: &AppState) {
         .skip(offset)
         .take(inner_height)
         .map(|(i, p)| {
-            let item = ListItem::new(p.to_string());
-            if i == state.path_cursor {
-                item.style(Style::default().bg(Color::Blue).fg(Color::White))
+            let selected = i == state.path_cursor;
+            let summary_style = if selected {
+                Style::default().bg(Color::Blue).fg(Color::White)
             } else {
-                item
+                Style::default()
+            };
+
+            if selected {
+                // Build a multi-line item: summary on first line, then one
+                // line per step showing the full column-level detail.
+                let mut lines = vec![Line::styled(format!(" {}", p), summary_style)];
+                for step in &p.steps {
+                    let detail = format!(
+                        "   {}.{} → {}.{}",
+                        step.from_table, step.from_column,
+                        step.to_table,   step.to_column,
+                    );
+                    lines.push(Line::styled(
+                        detail,
+                        Style::default().bg(Color::Blue).fg(Color::Cyan),
+                    ));
+                }
+                ListItem::new(Text::from(lines))
+            } else {
+                ListItem::new(Text::from(Line::styled(
+                    format!(" {}", p),
+                    summary_style,
+                )))
             }
         })
         .collect();
@@ -575,4 +612,72 @@ fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
             Constraint::Percentage((100 - percent_x) / 2),
         ])
         .split(popup_layout[1])[1]
+}
+
+fn render_log_viewer(f: &mut Frame, state: &AppState) {
+    let area = centered_rect(80, 70, f.area());
+    f.render_widget(Clear, area);
+
+    let cursor = match &state.mode {
+        Mode::LogViewer { cursor } => *cursor,
+        _ => 0,
+    };
+
+    let items: Vec<ListItem> = state
+        .logs
+        .iter()
+        .enumerate()
+        .map(|(i, entry)| {
+            let level_color = match entry.level {
+                crate::log::LogLevel::Error => Color::Red,
+                crate::log::LogLevel::Warn => Color::Yellow,
+                crate::log::LogLevel::Info => Color::White,
+            };
+            let line = Line::from(Span::styled(
+                entry.to_string(),
+                Style::default().fg(level_color),
+            ));
+            if i == cursor {
+                ListItem::new(line)
+                    .style(Style::default().bg(Color::DarkGray))
+            } else {
+                ListItem::new(line)
+            }
+        })
+        .collect();
+
+    let title = if state.logs.is_empty() {
+        " Log History — empty (Esc close) ".to_string()
+    } else {
+        format!(
+            " Log History ({}/{})  ↑↓/jk navigate  Esc close ",
+            cursor + 1,
+            state.logs.len()
+        )
+    };
+
+    let list = List::new(items)
+        .block(
+            Block::default()
+                .title(title)
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Color::Yellow)),
+        );
+
+    // Scroll so cursor is visible
+    let inner_height = area.height.saturating_sub(2) as usize;
+    let offset = if state.logs.is_empty() {
+        0
+    } else if cursor + 1 > inner_height {
+        cursor + 1 - inner_height
+    } else {
+        0
+    };
+
+    use ratatui::widgets::ListState;
+    let mut list_state = ListState::default();
+    list_state.select(Some(cursor));
+    *list_state.offset_mut() = offset;
+
+    f.render_stateful_widget(list, area, &mut list_state);
 }

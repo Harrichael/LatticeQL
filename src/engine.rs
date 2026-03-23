@@ -150,16 +150,37 @@ impl Engine {
                         via,
                     );
                     if let Some(path) = path {
+                        crate::log::info(format!(
+                            "Traversal: built explicit path {} via [{}]",
+                            path.steps.iter().map(|s| format!("{}.{} → {}.{}", s.from_table, s.from_column, s.to_table, s.to_column)).collect::<Vec<_>>().join(", "),
+                            via.join(", ")
+                        ));
                         self.apply_relation_rule(db, &path).await?;
                         self.rules.push(rule);
                         return Ok(None);
+                    } else {
+                        crate::log::warn(format!(
+                            "Traversal: could not build explicit path {} → {} via [{}] — no FK chain found; falling back to BFS",
+                            from_table, to_table, via.join(", ")
+                        ));
                     }
                 }
                 let result =
                     crate::schema::find_paths(&self.schema, from_table, to_table, via);
                 if result.paths.is_empty() {
+                    // Log which tables have FKs to help the user understand the schema
+                    let schema_fk_summary: Vec<String> = self.schema.tables.iter()
+                        .filter(|(_, info)| !info.foreign_keys.is_empty())
+                        .map(|(name, info)| format!("{}: [{}]", name,
+                            info.foreign_keys.iter().map(|fk| format!("{} → {}.{}", fk.from_column, fk.to_table, fk.to_column)).collect::<Vec<_>>().join(", ")))
+                        .collect();
+                    crate::log::warn(format!(
+                        "No path found between '{}' and '{}' via [{}]. Known FK relationships: {}",
+                        from_table, to_table, via.join(", "),
+                        if schema_fk_summary.is_empty() { "none (no FK constraints in schema)".to_string() } else { schema_fk_summary.join("; ") }
+                    ));
                     anyhow::bail!(
-                        "No path found between '{}' and '{}'",
+                        "No path found between '{}' and '{}' — check 'l' logs for schema FK details",
                         from_table,
                         to_table
                     );
@@ -242,14 +263,25 @@ fn attach_path_to_node<'a>(
 
         // Get the FK value from this node
         let fk_val = match node.row.get(&step.from_column) {
-            Some(crate::db::Value::Null) | None => return Ok(0),
+            Some(crate::db::Value::Null) | None => {
+                crate::log::info(format!(
+                    "Traversal step {}: skipping node in '{}' — FK column '{}' is null/missing",
+                    step_idx + 1, node.table, step.from_column
+                ));
+                return Ok(0);
+            }
             Some(v) => v.clone(),
         };
 
-        // Format FK value: integers unquoted, everything else single-quoted
+        // Format FK value for SQL literal
         let fk_sql_lit = match &fk_val {
             crate::db::Value::Integer(i) => i.to_string(),
             crate::db::Value::Float(f) => f.to_string(),
+            crate::db::Value::Bytes(b) => {
+                // Binary values (e.g. binary(16) UUIDs) must use MySQL hex literal X'...'
+                let hex: String = b.iter().map(|byte| format!("{:02x}", byte)).collect();
+                format!("X'{}'", hex)
+            }
             other => format!("'{}'", other.to_string().replace('\'', "''")),
         };
 
@@ -273,6 +305,10 @@ fn attach_path_to_node<'a>(
 
         let rows = db.query(&sql).await?;
         let count = rows.len();
+        crate::log::info(format!(
+            "Traversal step {}/{}: {} — {} row(s) returned",
+            step_idx + 1, path.steps.len(), sql, count
+        ));
         for row in rows {
             let mut child = DataNode::new(step.to_table.clone(), row);
             attach_path_to_node(db, &mut child, path, step_idx + 1).await?;

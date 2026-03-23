@@ -1,6 +1,7 @@
 mod config;
 mod db;
 mod engine;
+mod log;
 mod rules;
 mod schema;
 mod ui;
@@ -48,9 +49,14 @@ async fn main() -> Result<()> {
     let mut engine = Engine::new(schema);
     let mut state = AppState::new();
     state.table_names = table_names;
-    let defaults = config::load_column_defaults(&std::env::current_dir()?)?;
-    state.default_visible_columns = defaults.global;
-    state.default_visible_columns_by_table = defaults.per_table;
+    let defaults = config::load_config(&std::env::current_dir()?)?;
+    state.default_visible_columns = defaults.columns.global;
+    state.default_visible_columns_by_table = defaults.columns.per_table;
+    // Inject virtual FKs from config.
+    for vfk in defaults.virtual_fks {
+        state.virtual_fks.push(vfk.clone());
+        engine.schema.virtual_fks.push(vfk);
+    }
     // Build per-table column lists for command completion hints.
     state.table_columns = engine.schema.tables.iter().map(|(name, info)| {
         let cols = info.columns.iter().map(|c| c.name.clone()).collect();
@@ -88,6 +94,9 @@ async fn run_app(
     let mut pending_paths: Option<(rules::Rule, Vec<schema::TablePath>)> = None;
 
     loop {
+        // Drain any log entries queued by background code (e.g. type decoder warnings).
+        state.logs.extend(log::drain());
+
         // Draw
         terminal.draw(|f| ui::render::render(f, state, &engine.roots))?;
 
@@ -399,6 +408,9 @@ async fn handle_key(
                         }
                     }
                 }
+                KeyCode::Char('l') => {
+                    state.mode = Mode::LogViewer { cursor: state.logs.len().saturating_sub(1) };
+                }
                 _ => {}
             }
         }
@@ -593,6 +605,26 @@ async fn handle_key(
             state.mode = Mode::Normal;
         }
 
+        // ── Log viewer ───────────────────────────────────────────────────
+        Mode::LogViewer { cursor } => {
+            match key.code {
+                KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('l') => {
+                    state.mode = Mode::Normal;
+                }
+                KeyCode::Up | KeyCode::Char('k') => {
+                    if cursor > 0 {
+                        state.mode = Mode::LogViewer { cursor: cursor - 1 };
+                    }
+                }
+                KeyCode::Down | KeyCode::Char('j') => {
+                    if cursor + 1 < state.logs.len() {
+                        state.mode = Mode::LogViewer { cursor: cursor + 1 };
+                    }
+                }
+                _ => {}
+            }
+        }
+
         // ── Virtual FK manager ───────────────────────────────────────────
         Mode::VirtualFkManager { cursor } => {
             match key.code {
@@ -620,6 +652,12 @@ async fn handle_key(
                             cursor
                         };
                         state.mode = Mode::VirtualFkManager { cursor: new_cursor };
+                    }
+                }
+                KeyCode::Char('s') if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) => {
+                    match config::save_virtual_fks(&std::env::current_dir()?, &state.virtual_fks) {
+                        Ok(path) => { state.mode = Mode::Info(format!("Virtual FKs saved to {}", path.display())); }
+                        Err(e) => { state.mode = Mode::Error(format!("Save failed: {}", e)); }
                     }
                 }
                 _ => {}
