@@ -34,11 +34,9 @@ impl Schema {
     /// Explore all tables in the database and build the schema.
     pub async fn explore(db: &dyn Database) -> Result<Self> {
         let table_names = db.list_tables().await?;
-        let mut tables = HashMap::new();
-        for name in table_names {
-            let info = db.describe_table(&name).await?;
-            tables.insert(name, info);
-        }
+        eprintln!("Found {} tables, loading metadata…", table_names.len());
+        let table_infos = db.describe_all_tables(&table_names).await?;
+        let tables = table_infos.into_iter().map(|t| (t.name.clone(), t)).collect();
         Ok(Self { tables, virtual_fks: Vec::new() })
     }
 

@@ -1,5 +1,5 @@
 [package]
-name = "arborql"
+name = "latticeql"
 version = "0.1.0"
 edition = "2021"
 description = "Navigate complex datasets from multiple sources intuitively in a unified query interface"

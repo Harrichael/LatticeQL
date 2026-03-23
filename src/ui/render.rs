@@ -242,10 +242,10 @@ fn render_command_bar(f: &mut Frame, state: &AppState, area: Rect) {
     } else {
         let (title, display) = match &state.mode {
             Mode::Normal => (
-                " ArborQL ",
+                " LatticeQL ",
                 " ':' command  'j/k' navigate  'f' fold  's' schema  'c' columns  'v' virtual FKs  'r' reorder  'q' quit",
             ),
-            _ => (" ArborQL ", ""),
+            _ => (" LatticeQL ", ""),
         };
         let block = Block::default().title(title).borders(Borders::ALL);
         let para = Paragraph::new(display)

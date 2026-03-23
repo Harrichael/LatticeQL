@@ -88,7 +88,7 @@ fn discover_config_files(cwd: &Path) -> Result<Vec<PathBuf>> {
     let mut found: Vec<PathBuf> = Vec::new();
     let mut current = cwd.clone();
     loop {
-        let cfg = current.join(".arborql").join("default.jsonnet");
+        let cfg = current.join(".latticeql").join("default.jsonnet");
         if cfg.is_file() {
             found.push(cfg);
         }
@@ -99,7 +99,7 @@ fn discover_config_files(cwd: &Path) -> Result<Vec<PathBuf>> {
 
     // If home was not encountered in the walk (cwd is outside $HOME),
     // append it as the most generic fallback.
-    let home_cfg = home.join(".arborql").join("default.jsonnet");
+    let home_cfg = home.join(".latticeql").join("default.jsonnet");
     if home_cfg.is_file() && !found.contains(&home_cfg) {
         found.push(home_cfg);
     }
@@ -120,7 +120,7 @@ mod tests {
 
     fn temp_dir() -> PathBuf {
         let base = std::env::temp_dir().join(format!(
-            "arborql-config-test-{}",
+            "latticeql-config-test-{}",
             SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap_or_default()
@@ -141,16 +141,16 @@ mod tests {
         let home = temp_dir();
         let cwd = home.join("work").join("repo");
         fs::create_dir_all(&cwd).unwrap();
-        fs::create_dir_all(home.join(".arborql")).unwrap();
-        fs::create_dir_all(cwd.join(".arborql")).unwrap();
+        fs::create_dir_all(home.join(".latticeql")).unwrap();
+        fs::create_dir_all(cwd.join(".latticeql")).unwrap();
 
         fs::write(
-            home.join(".arborql/default.jsonnet"),
+            home.join(".latticeql/default.jsonnet"),
             r#"{ columns: { default: ["id", "name"], tables: { orders: { default: ["id", "status"] } } } }"#,
         )
         .unwrap();
         fs::write(
-            cwd.join(".arborql/default.jsonnet"),
+            cwd.join(".latticeql/default.jsonnet"),
             r#"{ columns: { tables: { users: { default: ["id", "email"] } } } }"#,
         )
         .unwrap();

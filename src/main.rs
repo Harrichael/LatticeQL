@@ -19,9 +19,9 @@ use std::io;
 use ui::app::{AppState, ColumnManagerItem, Mode, VirtualFkAddStep};
 use schema::VirtualFkDef;
 
-/// ArborQL — Navigate complex datasets from multiple sources intuitively.
+/// LatticeQL — Navigate complex datasets from multiple sources intuitively.
 #[derive(Parser, Debug)]
-#[command(name = "arborql", version, about)]
+#[command(name = "latticeql", version, about)]
 struct Args {
     /// Database connection URL.
     ///
