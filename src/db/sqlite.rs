@@ -42,7 +42,8 @@ impl Database for SqliteDb {
             let pk: i64 = row.try_get("pk").unwrap_or(0);
             columns.push(ColumnInfo {
                 name,
-                data_type,
+                data_type: data_type.clone(),
+                column_type: data_type,
                 nullable: notnull == 0,
                 is_primary_key: pk > 0,
             });

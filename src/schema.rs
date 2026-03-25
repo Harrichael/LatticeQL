@@ -257,6 +257,7 @@ mod tests {
             columns: vec![ColumnInfo {
                 name: "id".to_string(),
                 data_type: "INTEGER".to_string(),
+                column_type: "INTEGER".to_string(),
                 nullable: false,
                 is_primary_key: true,
             }],

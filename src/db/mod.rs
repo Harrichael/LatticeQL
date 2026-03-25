@@ -22,7 +22,7 @@ impl std::fmt::Display for Value {
             Value::Integer(i) => write!(f, "{}", i),
             Value::Float(v) => write!(f, "{}", v),
             Value::Text(s) => write!(f, "{}", s),
-            Value::Bytes(b) => write!(f, "<{} bytes>", b.len()),
+            Value::Bytes(b) => write!(f, "0x{}", b.iter().map(|byte| format!("{:02x}", byte)).collect::<String>()),
         }
     }
 }
@@ -34,7 +34,11 @@ pub type Row = HashMap<String, Value>;
 #[derive(Debug, Clone)]
 pub struct ColumnInfo {
     pub name: String,
+    /// Short type name, e.g. `"binary"`, `"varchar"`, `"int"`.
     pub data_type: String,
+    /// Full type declaration as reported by the database, e.g. `"binary(16)"`,
+    /// `"varchar(255)"`.  Empty string for backends that don't expose this.
+    pub column_type: String,
     pub nullable: bool,
     pub is_primary_key: bool,
 }
@@ -80,6 +84,12 @@ pub trait Database: Send + Sync {
 
     /// Execute a raw SELECT and return rows.
     async fn query(&self, sql: &str) -> Result<Vec<Row>>;
+
+    /// Return true when this database supports the `UUID_TO_BIN` / `BIN_TO_UUID`
+    /// functions (MySQL 8+).  Defaults to false.
+    fn supports_uuid_functions(&self) -> bool {
+        false
+    }
 }
 
 /// Connect to the given URL and return a boxed `Database`.
