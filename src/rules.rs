@@ -540,9 +540,28 @@ pub fn conditions_to_sql(conditions: &[Condition]) -> String {
     if conditions.is_empty() {
         return String::new();
     }
+    const UUID_PREFIX: &str = "__uuid__";
     let parts: Vec<String> = conditions
         .iter()
         .map(|c| {
+            // __uuid__<col> virtual columns are resolved via UUID_TO_BIN so the
+            // comparison is performed against the real underlying binary column.
+            if let Some(real_col) = c.column.strip_prefix(UUID_PREFIX) {
+                let escaped = c.value.replace('\'', "''");
+                return match &c.op {
+                    Op::Eq => format!("{} = UUID_TO_BIN('{}')", real_col, escaped),
+                    Op::Ne => format!("{} != UUID_TO_BIN('{}')", real_col, escaped),
+                    Op::Lt => format!("{} < UUID_TO_BIN('{}')", real_col, escaped),
+                    Op::Le => format!("{} <= UUID_TO_BIN('{}')", real_col, escaped),
+                    Op::Gt => format!("{} > UUID_TO_BIN('{}')", real_col, escaped),
+                    Op::Ge => format!("{} >= UUID_TO_BIN('{}')", real_col, escaped),
+                    // LIKE on UUID strings is applied against the formatted string,
+                    // so use BIN_TO_UUID for comparison here.
+                    Op::StartsWith => format!("BIN_TO_UUID({}) LIKE '{}%'", real_col, escaped),
+                    Op::EndsWith => format!("BIN_TO_UUID({}) LIKE '%{}'", real_col, escaped),
+                    Op::Contains => format!("BIN_TO_UUID({}) LIKE '%{}%'", real_col, escaped),
+                };
+            }
             let escaped = c.value.replace('\'', "''");
             match &c.op {
                 Op::Eq => format!("{} = '{}'", c.column, escaped),
@@ -818,5 +837,91 @@ mod tests {
     fn test_completions_case_insensitive_table() {
         let c = completions_at("USERS wh", &tables(), &columns());
         assert_eq!(c, vec![Completion::Token("where".to_string())]);
+    }
+
+    // -----------------------------------------------------------------------
+    // __uuid__ virtual-column conditions
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_conditions_to_sql_uuid_eq() {
+        let conds = vec![Condition {
+            column: "__uuid__user_id".to_string(),
+            op: Op::Eq,
+            value: "11111111-2222-3333-4444-555555555555".to_string(),
+        }];
+        let sql = conditions_to_sql(&conds);
+        assert_eq!(
+            sql,
+            "user_id = UUID_TO_BIN('11111111-2222-3333-4444-555555555555')"
+        );
+    }
+
+    #[test]
+    fn test_conditions_to_sql_uuid_ne() {
+        let conds = vec![Condition {
+            column: "__uuid__tid".to_string(),
+            op: Op::Ne,
+            value: "aabbccdd-eeff-0011-2233-445566778899".to_string(),
+        }];
+        let sql = conditions_to_sql(&conds);
+        assert_eq!(
+            sql,
+            "tid != UUID_TO_BIN('aabbccdd-eeff-0011-2233-445566778899')"
+        );
+    }
+
+    #[test]
+    fn test_conditions_to_sql_uuid_contains() {
+        let conds = vec![Condition {
+            column: "__uuid__rid".to_string(),
+            op: Op::Contains,
+            value: "1234".to_string(),
+        }];
+        let sql = conditions_to_sql(&conds);
+        assert_eq!(sql, "BIN_TO_UUID(rid) LIKE '%1234%'");
+    }
+
+    #[test]
+    fn test_conditions_to_sql_uuid_startswith() {
+        let conds = vec![Condition {
+            column: "__uuid__rid".to_string(),
+            op: Op::StartsWith,
+            value: "1234".to_string(),
+        }];
+        let sql = conditions_to_sql(&conds);
+        assert_eq!(sql, "BIN_TO_UUID(rid) LIKE '1234%'");
+    }
+
+    #[test]
+    fn test_conditions_to_sql_uuid_endswith() {
+        let conds = vec![Condition {
+            column: "__uuid__rid".to_string(),
+            op: Op::EndsWith,
+            value: "1234".to_string(),
+        }];
+        let sql = conditions_to_sql(&conds);
+        assert_eq!(sql, "BIN_TO_UUID(rid) LIKE '%1234'");
+    }
+
+    #[test]
+    fn test_conditions_to_sql_uuid_mixed_with_normal() {
+        let conds = vec![
+            Condition {
+                column: "name".to_string(),
+                op: Op::Eq,
+                value: "Alice".to_string(),
+            },
+            Condition {
+                column: "__uuid__user_id".to_string(),
+                op: Op::Eq,
+                value: "11111111-2222-3333-4444-555555555555".to_string(),
+            },
+        ];
+        let sql = conditions_to_sql(&conds);
+        assert_eq!(
+            sql,
+            "name = 'Alice' AND user_id = UUID_TO_BIN('11111111-2222-3333-4444-555555555555')"
+        );
     }
 }
