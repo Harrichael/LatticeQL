@@ -59,6 +59,10 @@ pub enum Mode {
     VirtualFkAdd(VirtualFkAddStep),
     /// User is viewing the internal log history.
     LogViewer { cursor: usize },
+    /// User is browsing the list of available manuals.
+    ManualList { cursor: usize },
+    /// User is reading a specific manual (index into MANUALS slice, scroll offset).
+    ManualView { index: usize, scroll: usize },
     /// User is doing a reverse-i-search through command history.
     CommandSearch {
         /// The search query typed so far.
