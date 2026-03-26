@@ -51,7 +51,7 @@ async fn main() -> Result<()> {
     let mut engine = Engine::new(schema);
     let mut state = AppState::new();
     state.table_names = table_names;
-    let defaults = config::load_config(&std::env::current_dir()?)?;
+    let defaults = config::load_config()?;
     state.default_visible_columns = defaults.columns.global;
     state.default_visible_columns_by_table = defaults.columns.per_table;
     let history_max_len = defaults.history_max_len;
@@ -869,7 +869,7 @@ async fn handle_key(
                     }
                 }
                 KeyCode::Char('s') if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) => {
-                    match config::save_virtual_fks(&std::env::current_dir()?, &state.virtual_fks) {
+                    match config::save_virtual_fks(&state.virtual_fks) {
                         Ok(path) => { state.mode = Mode::Info(format!("Virtual FKs saved to {}", path.display())); }
                         Err(e) => { state.mode = Mode::Error(format!("Save failed: {}", e)); }
                     }
@@ -1152,7 +1152,7 @@ async fn handle_key(
                         };
                         state.virtual_fks.push(vfk.clone());
                         engine.schema.virtual_fks.push(vfk);
-                        match config::save_virtual_fks(&std::env::current_dir()?, &state.virtual_fks) {
+                        match config::save_virtual_fks(&state.virtual_fks) {
                             Ok(path) => {
                                 state.reset_overlay_search();
                                 state.mode = Mode::Info(format!("Virtual FK saved to {}", path.display()));

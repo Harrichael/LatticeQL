@@ -3,7 +3,7 @@ use rs_jsonnet::evaluate_with_filename;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use crate::schema::VirtualFkDef;
 
@@ -101,34 +101,31 @@ impl From<&VirtualFkDef> for RawVirtualFk {
     }
 }
 
-pub fn load_config(cwd: &Path) -> Result<AppConfig> {
-    let config_files = discover_config_files(cwd)?;
+pub fn load_config() -> Result<AppConfig> {
+    let path = home_config_path()?;
     let mut columns = ColumnDefaults::default();
     let mut virtual_fks: Vec<VirtualFkDef> = Vec::new();
     let mut history_max_len: Option<usize> = None;
 
-    // Apply most-generic first so more-specific configs win (last write wins).
-    for file in config_files.iter().rev() {
-        let raw = fs::read_to_string(file)
-            .with_context(|| format!("failed to read config file: {}", file.display()))?;
-        let rendered = evaluate_with_filename(raw.trim(), &file.display().to_string())
-            .map_err(|e| anyhow::anyhow!("jsonnet eval failed for {}: {}", file.display(), e))?;
+    if path.is_file() {
+        let raw = fs::read_to_string(&path)
+            .with_context(|| format!("failed to read config file: {}", path.display()))?;
+        let rendered = evaluate_with_filename(raw.trim(), &path.display().to_string())
+            .map_err(|e| anyhow::anyhow!("jsonnet eval failed for {}: {}", path.display(), e))?;
         let json = rendered.to_json_value();
         let parsed: RawConfig = serde_json::from_value(json).with_context(|| {
             format!(
                 "failed to parse config JSON from jsonnet file: {}",
-                file.display()
+                path.display()
             )
         })?;
         apply_column_layer(&mut columns, &parsed);
-        // Merge virtual FKs: add any not already present (deduplicate by all fields).
         for raw_vfk in parsed.virtual_fks {
             let vfk = VirtualFkDef::from(raw_vfk);
             if !virtual_fks.contains(&vfk) {
                 virtual_fks.push(vfk);
             }
         }
-        // Most-specific config wins (last write wins in rev iteration).
         if let Some(v) = parsed.history_max_len {
             history_max_len = Some(v as usize);
         }
@@ -141,17 +138,11 @@ pub fn load_config(cwd: &Path) -> Result<AppConfig> {
     })
 }
 
-/// Persist `vfks` into the most-specific config file that was discovered for
-/// `cwd` (i.e. the same file that was read). If no config file exists anywhere
-/// in the search path, creates `.latticeql/default.jsonnet` in `cwd`.
+/// Persist `vfks` into `~/.latticeql/default.jsonnet`.
 /// Reads the existing file first so column settings are preserved; writes back
 /// as plain JSON (valid jsonnet).
-pub fn save_virtual_fks(cwd: &Path, vfks: &[VirtualFkDef]) -> Result<PathBuf> {
-    // Use the first (most-specific) discovered file, or default to cwd.
-    let path = discover_config_files(cwd)?
-        .into_iter()
-        .next()
-        .unwrap_or_else(|| cwd.join(".latticeql").join("default.jsonnet"));
+pub fn save_virtual_fks(vfks: &[VirtualFkDef]) -> Result<PathBuf> {
+    let path = home_config_path()?;
 
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
@@ -177,8 +168,8 @@ pub fn save_virtual_fks(cwd: &Path, vfks: &[VirtualFkDef]) -> Result<PathBuf> {
 }
 
 /// Kept for backward-compat; callers that only need columns can use this.
-pub fn load_column_defaults(cwd: &Path) -> Result<ColumnDefaults> {
-    Ok(load_config(cwd)?.columns)
+pub fn load_column_defaults() -> Result<ColumnDefaults> {
+    Ok(load_config()?.columns)
 }
 
 fn apply_column_layer(target: &mut ColumnDefaults, layer: &RawConfig) {
@@ -192,31 +183,8 @@ fn apply_column_layer(target: &mut ColumnDefaults, layer: &RawConfig) {
     }
 }
 
-fn discover_config_files(cwd: &Path) -> Result<Vec<PathBuf>> {
-    let home = home_dir()?;
-    let cwd = cwd.canonicalize().unwrap_or_else(|_| cwd.to_path_buf());
-
-    // Walk from cwd upward — most specific (cwd) first, most generic (root) last.
-    let mut found: Vec<PathBuf> = Vec::new();
-    let mut current = cwd.clone();
-    loop {
-        let cfg = current.join(".latticeql").join("default.jsonnet");
-        if cfg.is_file() {
-            found.push(cfg);
-        }
-        if !current.pop() {
-            break;
-        }
-    }
-
-    // If home was not encountered in the walk (cwd is outside $HOME),
-    // append it as the most generic fallback.
-    let home_cfg = home.join(".latticeql").join("default.jsonnet");
-    if home_cfg.is_file() && !found.contains(&home_cfg) {
-        found.push(home_cfg);
-    }
-
-    Ok(found)
+fn home_config_path() -> Result<PathBuf> {
+    Ok(home_dir()?.join(".latticeql").join("default.jsonnet"))
 }
 
 pub(crate) fn home_dir() -> Result<PathBuf> {
@@ -228,7 +196,12 @@ pub(crate) fn home_dir() -> Result<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    // Serialize tests that mutate the HOME environment variable so they don't
+    // stomp on each other when the test runner uses multiple threads.
+    static HOME_LOCK: Mutex<()> = Mutex::new(());
 
     fn temp_dir() -> PathBuf {
         let base = std::env::temp_dir().join(format!(
@@ -243,12 +216,10 @@ mod tests {
     }
 
     #[test]
-    fn virtual_fks_loaded_and_deduped() {
+    fn virtual_fks_loaded_from_home_config_and_deduped() {
+        let _guard = HOME_LOCK.lock().unwrap();
         let home = temp_dir();
-        let cwd = home.join("work").join("repo");
-        fs::create_dir_all(&cwd).unwrap();
         fs::create_dir_all(home.join(".latticeql")).unwrap();
-        fs::create_dir_all(cwd.join(".latticeql")).unwrap();
 
         let vfk_json = r#"{
           "from_table": "comments",
@@ -258,14 +229,16 @@ mod tests {
           "to_table": "posts",
           "to_column": "id"
         }"#;
-        // Same VFK in both home and cwd — should appear only once after merge.
-        let cfg_with_vfk = format!(r#"{{ columns: {{ default: ["id"] }}, virtual_fks: [{}] }}"#, vfk_json);
-        fs::write(home.join(".latticeql/default.jsonnet"), &cfg_with_vfk).unwrap();
-        fs::write(cwd.join(".latticeql/default.jsonnet"), &cfg_with_vfk).unwrap();
+        // Two identical VFK entries in the same file — should be deduplicated.
+        let cfg_with_dup = format!(
+            r#"{{ columns: {{ default: ["id"] }}, virtual_fks: [{0}, {0}] }}"#,
+            vfk_json
+        );
+        fs::write(home.join(".latticeql/default.jsonnet"), &cfg_with_dup).unwrap();
 
         let old_home = std::env::var("HOME").ok();
         std::env::set_var("HOME", &home);
-        let cfg = load_config(&cwd).unwrap();
+        let cfg = load_config().unwrap();
         if let Some(old_home) = old_home {
             std::env::set_var("HOME", old_home);
         }
@@ -278,8 +251,9 @@ mod tests {
 
     #[test]
     fn save_and_reload_virtual_fks() {
-        let dir = temp_dir();
-        fs::create_dir_all(dir.join(".latticeql")).unwrap();
+        let _guard = HOME_LOCK.lock().unwrap();
+        let home = temp_dir();
+        fs::create_dir_all(home.join(".latticeql")).unwrap();
 
         let vfks = vec![crate::schema::VirtualFkDef {
             from_table: "comments".to_string(),
@@ -290,11 +264,10 @@ mod tests {
             to_column: "id".to_string(),
         }];
 
-        save_virtual_fks(&dir, &vfks).unwrap();
-
         let old_home = std::env::var("HOME").ok();
-        std::env::set_var("HOME", &dir);
-        let cfg = load_config(&dir).unwrap();
+        std::env::set_var("HOME", &home);
+        save_virtual_fks(&vfks).unwrap();
+        let cfg = load_config().unwrap();
         if let Some(old_home) = old_home {
             std::env::set_var("HOME", old_home);
         }
@@ -306,8 +279,9 @@ mod tests {
 
     #[test]
     fn save_and_reload_simple_virtual_fk() {
-        let dir = temp_dir();
-        fs::create_dir_all(dir.join(".latticeql")).unwrap();
+        let _guard = HOME_LOCK.lock().unwrap();
+        let home = temp_dir();
+        fs::create_dir_all(home.join(".latticeql")).unwrap();
 
         // A simple FK with no type discriminator
         let vfks = vec![crate::schema::VirtualFkDef {
@@ -319,11 +293,10 @@ mod tests {
             to_column: "id".to_string(),
         }];
 
-        save_virtual_fks(&dir, &vfks).unwrap();
-
         let old_home = std::env::var("HOME").ok();
-        std::env::set_var("HOME", &dir);
-        let cfg = load_config(&dir).unwrap();
+        std::env::set_var("HOME", &home);
+        save_virtual_fks(&vfks).unwrap();
+        let cfg = load_config().unwrap();
         if let Some(old_home) = old_home {
             std::env::set_var("HOME", old_home);
         }
@@ -342,27 +315,20 @@ mod tests {
     }
 
     #[test]
-    fn layered_config_merges_global_and_table_overrides() {
+    fn config_loads_columns_from_home() {
+        let _guard = HOME_LOCK.lock().unwrap();
         let home = temp_dir();
-        let cwd = home.join("work").join("repo");
-        fs::create_dir_all(&cwd).unwrap();
         fs::create_dir_all(home.join(".latticeql")).unwrap();
-        fs::create_dir_all(cwd.join(".latticeql")).unwrap();
 
         fs::write(
             home.join(".latticeql/default.jsonnet"),
             r#"{ columns: { default: ["id", "name"], tables: { orders: { default: ["id", "status"] } } } }"#,
         )
         .unwrap();
-        fs::write(
-            cwd.join(".latticeql/default.jsonnet"),
-            r#"{ columns: { tables: { users: { default: ["id", "email"] } } } }"#,
-        )
-        .unwrap();
 
         let old_home = std::env::var("HOME").ok();
         std::env::set_var("HOME", &home);
-        let cfg = load_column_defaults(&cwd).unwrap();
+        let cfg = load_column_defaults().unwrap();
         if let Some(old_home) = old_home {
             std::env::set_var("HOME", old_home);
         }
@@ -371,10 +337,6 @@ mod tests {
         assert_eq!(
             cfg.for_table("orders"),
             &vec!["id".to_string(), "status".to_string()]
-        );
-        assert_eq!(
-            cfg.for_table("users"),
-            &vec!["id".to_string(), "email".to_string()]
         );
     }
 }
