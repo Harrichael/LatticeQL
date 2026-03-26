@@ -999,11 +999,23 @@ async fn handle_key(
                 }
 
                 // ── Up/Down: navigate the active dropdown ──────────────
-                KeyCode::Up | KeyCode::Char('k') if !state.overlay_search_active => {
+                // Arrow keys always navigate regardless of search state.
+                // 'k'/'j' only navigate when search input is not active
+                // (when search is active they fall through to the Char(c) handler).
+                KeyCode::Up => {
                     let c = state.wizard_cursor();
                     if c > 0 { state.wizard_set_cursor(c - 1); }
                 }
-                KeyCode::Down | KeyCode::Char('j') if !state.overlay_search_active => {
+                KeyCode::Char('k') if !state.overlay_search_active => {
+                    let c = state.wizard_cursor();
+                    if c > 0 { state.wizard_set_cursor(c - 1); }
+                }
+                KeyCode::Down => {
+                    let fi = filtered_indices!(dropdown_items);
+                    let c = state.wizard_cursor();
+                    if c + 1 < fi.len() { state.wizard_set_cursor(c + 1); }
+                }
+                KeyCode::Char('j') if !state.overlay_search_active => {
                     let fi = filtered_indices!(dropdown_items);
                     let c = state.wizard_cursor();
                     if c + 1 < fi.len() { state.wizard_set_cursor(c + 1); }
@@ -1029,7 +1041,7 @@ async fn handle_key(
                 }
 
                 // ── Enter: confirm selection for active field ─────────
-                KeyCode::Enter if !state.overlay_search_active => {
+                KeyCode::Enter => {
                     let fi = filtered_indices!(dropdown_items);
                     if let Some(&orig) = fi.get(form.cursor) {
                         if let Some(raw_value) = dropdown_items.get(orig) {

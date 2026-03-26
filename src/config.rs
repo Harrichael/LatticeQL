@@ -66,9 +66,9 @@ struct RawTableColumnsConfig {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 struct RawVirtualFk {
     from_table: String,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     type_column: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     type_value: Option<String>,
     id_column: String,
     to_table: String,

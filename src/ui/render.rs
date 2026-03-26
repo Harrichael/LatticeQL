@@ -633,8 +633,6 @@ fn render_virtual_fk_add(f: &mut Frame, state: &mut AppState) {
 
     let form = if let Mode::VirtualFkAdd(ref form) = state.mode { form.clone() } else { return };
 
-    let has_search = state.overlay_search_active || !state.overlay_search.is_empty();
-
     // Outer block
     let complete = form.is_complete();
     let hint = if complete {
@@ -654,34 +652,28 @@ fn render_virtual_fk_add(f: &mut Frame, state: &mut AppState) {
     let inner = block.inner(area);
     f.render_widget(block, area);
 
-    // Layout inside block: header (7 rows) + dropdown (remaining) [+ search (3)]
+    // Layout inside block: header (7 rows) + dropdown (remaining)
+    // The dropdown delegates search-bar rendering to render_pick_list, so no
+    // extra height reservation is needed here.
     let header_height: u16 = 7;
-    let search_height: u16 = if has_search { 3 } else { 0 };
-    let dropdown_height = inner.height.saturating_sub(header_height + search_height);
+    let dropdown_height = inner.height.saturating_sub(header_height);
 
     let sections = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(header_height),
             Constraint::Length(dropdown_height),
-            Constraint::Length(search_height),
         ])
         .split(inner);
 
     let header_area = sections[0];
     let dropdown_area = sections[1];
-    let search_area = sections[2];
 
     // ── Header: show all 6 fields + values ──────────────────────────────
     render_vfk_form_header(f, &form, header_area);
 
-    // ── Dropdown: pick-list for the active field ─────────────────────────
+    // ── Dropdown: pick-list for the active field (handles search bar too) ──
     render_vfk_form_dropdown(f, state, &form, dropdown_area);
-
-    // ── Search bar ──────────────────────────────────────────────────────
-    if has_search {
-        render_search_bar(f, search_area, &state.overlay_search.clone(), state.overlay_search_active);
-    }
 }
 
 /// Render the 6-field summary header showing current values for every field.
