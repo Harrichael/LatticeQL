@@ -25,8 +25,8 @@ pub fn render(f: &mut Frame, state: &mut AppState, roots: &[DataNode]) {
     };
 
     // Split main_area into data viewer + command bar.
-    // In Command mode we use an extra row to show next-token hints.
-    let cmd_height: u16 = if state.mode == Mode::Command { 4 } else { 3 };
+    // In Command mode and CommandSearch mode we use an extra row for hints/search.
+    let cmd_height: u16 = if matches!(state.mode, Mode::Command | Mode::CommandSearch { .. }) { 4 } else { 3 };
     let vert = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Min(3), Constraint::Length(cmd_height)])
@@ -240,6 +240,43 @@ fn render_command_bar(f: &mut Frame, state: &AppState, area: Rect) {
             area.x + 1 + 1 + state.cursor as u16, // +1 border, +1 for ':'
             area.y + 1,
         ));
+    } else if let Mode::CommandSearch { ref query, match_cursor, .. } = state.mode {
+        let block = Block::default()
+            .title(" Reverse Search (Ctrl+R: older match, Esc: cancel) ")
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Yellow));
+        let inner = block.inner(area);
+        f.render_widget(block, area);
+
+        let rows = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(1), Constraint::Length(1)])
+            .split(inner);
+
+        // Search prompt line
+        let prompt = Paragraph::new(Line::from(vec![
+            Span::styled("(reverse-i-search): ", Style::default().fg(Color::Yellow)),
+            Span::styled(query.clone(), Style::default().fg(Color::White)),
+            Span::styled("▌", Style::default().fg(Color::Yellow)),
+        ]));
+        f.render_widget(prompt, rows[0]);
+
+        // Matched command line – resolve the match once and reuse it for both
+        // the display text and the colour selection.
+        let matched = state
+            .command_history
+            .search_reverse(query, match_cursor)
+            .and_then(|i| state.command_history.entries().get(i))
+            .map(|e| e.text.clone());
+        let (match_text, match_style) = match matched {
+            Some(text) => (text, Style::default().fg(Color::White)),
+            None => ("(no result)".to_string(), Style::default().fg(Color::Red)),
+        };
+        let match_para = Paragraph::new(Line::from(vec![
+            Span::styled("→ ", Style::default().fg(Color::Yellow)),
+            Span::styled(match_text, match_style),
+        ]));
+        f.render_widget(match_para, rows[1]);
     } else {
         let has_warn_or_error = state.logs.iter().any(|e| {
             matches!(e.level, crate::log::LogLevel::Warn | crate::log::LogLevel::Error)

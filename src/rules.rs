@@ -55,7 +55,7 @@ enum GrammarState {
 /// Quoted strings (single or double quotes) are kept together as one token.
 /// Commas are emitted as their own `","` token.
 /// Returns `(complete_tokens, partial_last_token)`.
-fn tokenize_partial(input: &str) -> (Vec<String>, String) {
+pub fn tokenize_partial(input: &str) -> (Vec<String>, String) {
     let mut tokens = Vec::new();
     let mut current = String::new();
     let mut in_quote = false;

@@ -1,3 +1,4 @@
+use crate::command_history::CommandHistory;
 use crate::rules::Rule;
 use crate::schema::{TablePath, VirtualFkDef};
 use std::collections::HashMap;
@@ -58,6 +59,15 @@ pub enum Mode {
     VirtualFkAdd(VirtualFkAddStep),
     /// User is viewing the internal log history.
     LogViewer { cursor: usize },
+    /// User is doing a reverse-i-search through command history.
+    CommandSearch {
+        /// The search query typed so far.
+        query: String,
+        /// How many times Ctrl+R has been pressed to scan further back.
+        match_cursor: usize,
+        /// Input buffer saved before entering search mode (restored on Esc).
+        saved_input: String,
+    },
 }
 
 /// Working item in column manager overlay.
@@ -122,6 +132,15 @@ pub struct AppState {
     pub overlay_search: String,
     /// Whether the search input is currently active (accepting keystrokes).
     pub overlay_search_active: bool,
+    /// Entered command history (append-only).
+    pub command_history: CommandHistory,
+    /// Index into `command_history` while browsing with Up/Down (None = not browsing).
+    pub history_cursor: Option<usize>,
+    /// Input buffer saved when the user first enters history-browsing mode
+    /// (restored when they press Down past the most recent entry).
+    pub history_draft: String,
+    /// Set to true by the key handler to request a Ctrl+Z terminal suspend.
+    pub should_suspend: bool,
 }
 
 impl AppState {
@@ -154,6 +173,10 @@ impl AppState {
             overlay_scroll: 0,
             overlay_search: String::new(),
             overlay_search_active: false,
+            command_history: CommandHistory::new(),
+            history_cursor: None,
+            history_draft: String::new(),
+            should_suspend: false,
         }
     }
 
@@ -223,6 +246,52 @@ impl AppState {
     pub fn clear_input(&mut self) {
         self.input.clear();
         self.cursor = 0;
+    }
+
+    /// Navigate to an older history entry (Up arrow behaviour in Command mode).
+    ///
+    /// Saves the current draft input on the first call so it can be restored
+    /// with [`history_down`] later.
+    pub fn history_up(&mut self) {
+        let len = self.command_history.len();
+        if len == 0 {
+            return;
+        }
+        match self.history_cursor {
+            None => {
+                self.history_draft = self.input.clone();
+                self.history_cursor = Some(len - 1);
+                self.input = self.command_history.entries()[len - 1].text.clone();
+                self.cursor = self.input.len();
+            }
+            Some(i) if i > 0 => {
+                self.history_cursor = Some(i - 1);
+                self.input = self.command_history.entries()[i - 1].text.clone();
+                self.cursor = self.input.len();
+            }
+            _ => {} // already at oldest entry
+        }
+    }
+
+    /// Navigate to a newer history entry, or restore the saved draft when the
+    /// user moves past the most recent entry (Down arrow behaviour in Command mode).
+    pub fn history_down(&mut self) {
+        match self.history_cursor {
+            None => {} // not currently browsing history
+            Some(i) => {
+                let len = self.command_history.len();
+                if i + 1 < len {
+                    self.history_cursor = Some(i + 1);
+                    self.input = self.command_history.entries()[i + 1].text.clone();
+                    self.cursor = self.input.len();
+                } else {
+                    // Past the end: restore the draft the user was typing.
+                    self.history_cursor = None;
+                    self.input = self.history_draft.clone();
+                    self.cursor = self.input.len();
+                }
+            }
+        }
     }
 
     /// Clear overlay search state (call when opening/closing a list overlay).

@@ -1,3 +1,4 @@
+mod command_history;
 mod config;
 mod db;
 mod engine;
@@ -15,6 +16,7 @@ use crossterm::{
 };
 use engine::{Engine, flatten_tree};
 use ratatui::{Terminal, backend::CrosstermBackend};
+use rules::Completion;
 use schema::Schema;
 use std::io;
 use ui::app::{AppState, ColumnManagerItem, Mode, VirtualFkAddStep};
@@ -52,6 +54,7 @@ async fn main() -> Result<()> {
     let defaults = config::load_config(&std::env::current_dir()?)?;
     state.default_visible_columns = defaults.columns.global;
     state.default_visible_columns_by_table = defaults.columns.per_table;
+    let history_max_len = defaults.history_max_len;
     // Inject virtual FKs from config.
     for vfk in defaults.virtual_fks {
         state.virtual_fks.push(vfk.clone());
@@ -63,6 +66,17 @@ async fn main() -> Result<()> {
         (name.clone(), cols)
     }).collect();
 
+    // Load persisted command history from ~/.latticeql/history.
+    let history_file = config::home_dir()
+        .ok()
+        .map(|h| h.join(".latticeql").join("history"));
+    if let Some(ref path) = history_file {
+        match command_history::CommandHistory::load_from_file(path, history_max_len) {
+            Ok(h) => state.command_history = h,
+            Err(e) => eprintln!("Warning: could not load command history: {}", e),
+        }
+    }
+
     // Set up terminal
     enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -70,7 +84,7 @@ async fn main() -> Result<()> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    let result = run_app(&mut terminal, &mut state, &mut engine, db.as_ref()).await;
+    let result = run_app(&mut terminal, &mut state, &mut engine, db.as_ref(), history_file).await;
 
     // Restore terminal
     disable_raw_mode()?;
@@ -88,6 +102,7 @@ async fn run_app(
     state: &mut AppState,
     engine: &mut Engine,
     db: &dyn db::Database,
+    history_file: Option<std::path::PathBuf>,
 ) -> Result<()> {
     // Pending paths waiting for user selection
     let mut pending_paths: Option<(rules::Rule, Vec<schema::TablePath>)> = None;
@@ -98,6 +113,24 @@ async fn run_app(
 
         // Draw
         terminal.draw(|f| ui::render::render(f, state, &engine.roots))?;
+
+        // Handle Ctrl+Z suspend request (set by handle_key, consumed here so
+        // that we have access to the terminal object).
+        if state.should_suspend {
+            state.should_suspend = false;
+            #[cfg(unix)]
+            {
+                disable_raw_mode()?;
+                execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
+                terminal.show_cursor()?;
+                // Send SIGTSTP to the current process, suspending it.
+                unsafe { libc::raise(libc::SIGTSTP) };
+                // Execution resumes here after the shell sends SIGCONT.
+                enable_raw_mode()?;
+                execute!(terminal.backend_mut(), EnterAlternateScreen)?;
+                terminal.clear()?;
+            }
+        }
 
         // Handle events (with a timeout so we can do async work)
         if event::poll(std::time::Duration::from_millis(50))? {
@@ -110,6 +143,7 @@ async fn run_app(
                         engine,
                         db,
                         &mut pending_paths,
+                        &history_file,
                     )
                     .await?;
                     if !handled {
@@ -261,6 +295,7 @@ async fn handle_key(
     engine: &mut Engine,
     db: &dyn db::Database,
     pending_paths: &mut Option<(rules::Rule, Vec<schema::TablePath>)>,
+    history_file: &Option<std::path::PathBuf>,
 ) -> Result<bool> {
     // Column manager overlay has exclusive key handling while open.
     if state.column_add.is_some() {
@@ -350,9 +385,14 @@ async fn handle_key(
         Mode::Normal => {
             match key.code {
                 KeyCode::Char('q') | KeyCode::Char('Q') => return Ok(false),
+                KeyCode::Char('z') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    state.should_suspend = true;
+                }
                 KeyCode::Char(':') => {
                     state.mode = Mode::Command;
                     state.clear_input();
+                    state.history_cursor = None;
+                    state.history_draft = String::new();
                 }
                 KeyCode::Char('j') | KeyCode::Down => state.select_down(),
                 KeyCode::Char('k') | KeyCode::Up => state.select_up(),
@@ -365,6 +405,16 @@ async fn handle_key(
                 }
                 KeyCode::Char('s') => {
                     state.show_schema = !state.show_schema;
+                }
+                KeyCode::Char('r') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    // Ctrl+R from Normal mode: jump straight into reverse command search.
+                    state.clear_input();
+                    state.history_cursor = None;
+                    state.mode = Mode::CommandSearch {
+                        query: String::new(),
+                        match_cursor: 0,
+                        saved_input: String::new(),
+                    };
                 }
                 KeyCode::Char('r') => {
                     if !engine.rules.is_empty() {
@@ -442,25 +492,164 @@ async fn handle_key(
                 KeyCode::Esc => {
                     state.mode = Mode::Normal;
                     state.clear_input();
+                    state.history_cursor = None;
+                    state.history_draft = String::new();
                 }
                 KeyCode::Enter => {
                     let cmd = state.input_text().trim().to_string();
+                    // Determine whether this command should be recorded.
+                    // If the user navigated to a history entry and runs it
+                    // unchanged, do not append it again.
+                    // Both `cmd` and `e.text` are trimmed, so the comparison
+                    // is between two normalised strings.
+                    let navigated_unchanged = state
+                        .history_cursor
+                        .and_then(|i| state.command_history.entries().get(i))
+                        .map(|e| e.text == cmd)
+                        .unwrap_or(false);
+                    if !navigated_unchanged {
+                        if state.command_history.push(cmd.clone()) {
+                            if let Some(ref path) = history_file {
+                                if let Some(entry) = state.command_history.entries().last() {
+                                    if let Err(e) = command_history::CommandHistory::append_to_file(entry, path) {
+                                        crate::log::warn(format!("could not save command history: {}", e));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    state.history_cursor = None;
+                    state.history_draft = String::new();
                     state.mode = Mode::Normal;
                     state.clear_input();
                     if !cmd.is_empty() {
                         execute_command(cmd, state, engine, db, pending_paths).await?;
                     }
                 }
-                KeyCode::Char(c) => {
-                    if key.modifiers.contains(KeyModifiers::CONTROL) && c == 'c' {
-                        return Ok(false);
+                // Up/Down: navigate command history.
+                KeyCode::Up => state.history_up(),
+                KeyCode::Down => state.history_down(),
+                // Tab: apply single-option completion.
+                KeyCode::Tab => {
+                    let completions = rules::completions_at(
+                        &state.input,
+                        &state.table_names,
+                        &state.table_columns,
+                    );
+                    if completions.len() == 1 {
+                        if let Completion::Token(ref s) = completions[0] {
+                            let (_, partial) =
+                                rules::tokenize_partial(&state.input);
+                            let prefix_len = state.input.len() - partial.len();
+                            state.input =
+                                format!("{}{} ", &state.input[..prefix_len], s);
+                            state.cursor = state.input.len();
+                            // Reset history browsing since the input changed.
+                            state.history_cursor = None;
+                        }
                     }
-                    state.input_char(c);
                 }
-                KeyCode::Backspace => state.input_backspace(),
+                KeyCode::Char(c) if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    match c {
+                        'c' => return Ok(false),
+                        'z' => state.should_suspend = true,
+                        'r' => {
+                            // Enter reverse-i-search mode.
+                            let saved = state.input.clone();
+                            state.mode = Mode::CommandSearch {
+                                query: String::new(),
+                                match_cursor: 0,
+                                saved_input: saved,
+                            };
+                        }
+                        _ => {}
+                    }
+                }
+                KeyCode::Char(c) => {
+                    state.input_char(c);
+                    // Typing resets history browsing position; we're now on
+                    // a modified (or new) command, no longer on the exact
+                    // history entry.
+                    state.history_cursor = None;
+                }
+                KeyCode::Backspace => {
+                    if state.input.is_empty() {
+                        // Backspace on empty input exits command mode.
+                        state.mode = Mode::Normal;
+                        state.history_cursor = None;
+                        state.history_draft = String::new();
+                    } else {
+                        state.input_backspace();
+                        state.history_cursor = None;
+                    }
+                }
                 KeyCode::Delete => state.input_delete(),
                 KeyCode::Left => state.cursor_left(),
                 KeyCode::Right => state.cursor_right(),
+                _ => {}
+            }
+        }
+
+        // ── Reverse-i-search mode ─────────────────────────────────────────
+        Mode::CommandSearch { query, match_cursor, saved_input } => {
+            match key.code {
+                KeyCode::Esc => {
+                    // Cancel search: restore the saved input.
+                    state.input = saved_input.clone();
+                    state.cursor = state.input.len();
+                    state.history_cursor = None;
+                    state.mode = Mode::Command;
+                }
+                KeyCode::Enter => {
+                    // Accept the current match and switch to Command mode.
+                    // The matched command is already in state.input (set while
+                    // rendering), so we just need to switch modes.
+                    let matched = state
+                        .command_history
+                        .search_reverse(&query, match_cursor)
+                        .and_then(|i| state.command_history.entries().get(i))
+                        .map(|e| e.text.clone());
+                    if let Some(text) = matched {
+                        state.input = text;
+                        state.cursor = state.input.len();
+                    }
+                    state.history_cursor = None;
+                    state.mode = Mode::Command;
+                }
+                KeyCode::Char(c) if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    match c {
+                        'c' => return Ok(false),
+                        'z' => state.should_suspend = true,
+                        'r' => {
+                            // Ctrl+R again: advance to the next older match.
+                            state.mode = Mode::CommandSearch {
+                                query,
+                                match_cursor: match_cursor + 1,
+                                saved_input,
+                            };
+                        }
+                        _ => {}
+                    }
+                }
+                KeyCode::Char(c) => {
+                    // Append to query, reset to most-recent match.
+                    let mut new_query = query.clone();
+                    new_query.push(c);
+                    state.mode = Mode::CommandSearch {
+                        query: new_query,
+                        match_cursor: 0,
+                        saved_input,
+                    };
+                }
+                KeyCode::Backspace => {
+                    let mut new_query = query.clone();
+                    new_query.pop();
+                    state.mode = Mode::CommandSearch {
+                        query: new_query,
+                        match_cursor: 0,
+                        saved_input,
+                    };
+                }
                 _ => {}
             }
         }
