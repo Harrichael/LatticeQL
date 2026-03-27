@@ -1,7 +1,7 @@
 use crate::db::{Database, Row};
 use crate::rules::{Rule, conditions_to_sql, row_matches_conditions};
 use crate::schema::Schema;
-use super::paths::{TablePath, PathSearchResult, find_paths, build_path_from_via};
+use super::paths::{TablePath, PathSearchResult, find_paths, build_path_from_via, MAX_PATH_DEPTH};
 use anyhow::Result;
 
 /// A node in the hierarchical data tree.
@@ -161,13 +161,13 @@ impl Engine {
                         return Ok(None);
                     } else {
                         crate::log::warn(format!(
-                            "Traversal: could not build explicit path {} → {} via [{}] — no FK chain found; falling back to BFS",
+                            "Traversal: could not build explicit path {} → {} via [{}] — no FK chain found; falling back to path search",
                             from_table, to_table, via.join(", ")
                         ));
                     }
                 }
                 let result =
-                    find_paths(&self.schema, from_table, to_table, via, 1, 10);
+                    find_paths(&self.schema, from_table, to_table, via, 1, MAX_PATH_DEPTH);
                 if result.paths.is_empty() {
                     // Log which tables have FKs to help the user understand the schema
                     let schema_fk_summary: Vec<String> = self.schema.tables.iter()

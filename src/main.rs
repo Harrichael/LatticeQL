@@ -741,7 +741,7 @@ async fn handle_key(
                         if let rules::Rule::Relation { from_table, to_table, via, .. } = rule {
                             let more = crate::engine::find_paths(
                                 &engine.schema, from_table, to_table, via,
-                                state.paths_next_depth, 10,
+                                state.paths_next_depth, engine::MAX_PATH_DEPTH,
                             );
                             paths.extend(more.paths.iter().cloned());
                             state.paths.extend(more.paths);

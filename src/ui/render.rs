@@ -402,14 +402,21 @@ fn render_path_selection(f: &mut Frame, state: &AppState) {
         })
         .collect();
 
+    let count_label = if state.paths_has_more {
+        format!(" {} paths (more available) ", state.paths.len())
+    } else {
+        format!(" {} paths ", state.paths.len())
+    };
+
     let mut block = Block::default()
-        .title(" Multiple paths found — ↑↓ navigate, Enter select, Esc cancel ")
+        .title(" ↑↓ navigate, Enter select, Esc cancel ")
+        .title_bottom(Line::styled(count_label, Style::default().fg(Color::White)))
         .borders(Borders::ALL)
         .style(Style::default().fg(Color::Cyan));
 
     if state.paths_has_more {
         block = block.title_bottom(
-            Line::styled(" n — load more paths ", Style::default().fg(Color::Yellow)),
+            Line::styled(" n — load more ", Style::default().fg(Color::Yellow)),
         );
     }
 

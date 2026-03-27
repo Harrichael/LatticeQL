@@ -1,5 +1,8 @@
 use crate::schema::Schema;
 
+/// Hard limit on path search depth (longest path in FK hops).
+pub const MAX_PATH_DEPTH: usize = 10;
+
 /// One step in a relationship path (table A → table B via real or virtual FK).
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct PathStep {
@@ -432,5 +435,50 @@ mod tests {
         ]);
         let r = find_paths(&schema, "users", "locations", &[], 1, 10);
         assert!(r.paths.len() >= 2, "Expected multiple paths, got {}", r.paths.len());
+    }
+
+    #[test]
+    fn test_resumption() {
+        // Schema with paths at two different depths:
+        // - depth 2: hub → spoke_N → target (12 spokes)
+        // - depth 3: hub → spoke_N → bridge → target (12 more paths)
+        // First call (depth 1..=10) finds 0 at depth 1, then all 12 at
+        // depth 2 (>= MAX_PATHS=10), finishes depth 2, returns with
+        // has_more=true and next_depth=3.
+        // Resume call finds the depth-3 paths.
+        let mut tables = vec![
+            make_table("hub", (0..12).map(|i| {
+                let col: &str = Box::leak(format!("fk_{}", i).into_boxed_str());
+                let tbl: &str = Box::leak(format!("spoke_{}", i).into_boxed_str());
+                (col, tbl, "id")
+            }).collect()),
+            make_table("bridge", vec![("target_id", "target", "id")]),
+            make_table("target", vec![]),
+        ];
+        for i in 0..12 {
+            let name: &str = Box::leak(format!("spoke_{}", i).into_boxed_str());
+            tables.push(make_table(name, vec![
+                ("target_id", "target", "id"),
+                ("bridge_id", "bridge", "id"),
+            ]));
+        }
+        let schema = schema_from(tables);
+
+        // First call: searches all depths up to MAX_PATH_DEPTH
+        let r1 = find_paths(&schema, "hub", "target", &[], 1, MAX_PATH_DEPTH);
+        assert!(r1.paths.len() >= 10, "Expected >= 10 paths, got {}", r1.paths.len());
+        assert!(r1.has_more, "has_more should be true (depth-3 paths remain)");
+        assert_eq!(r1.next_depth, 3);
+        // All first-batch paths should be depth 2
+        for p in &r1.paths {
+            assert_eq!(p.steps.len(), 2, "First batch should all be depth-2 paths");
+        }
+
+        // Resume from next_depth
+        let r2 = find_paths(&schema, "hub", "target", &[], r1.next_depth, MAX_PATH_DEPTH);
+        assert!(!r2.paths.is_empty(), "Resumption should find depth-3 paths");
+        for p in &r2.paths {
+            assert!(p.steps.len() >= 3, "Resumed paths should be depth 3+");
+        }
     }
 }
