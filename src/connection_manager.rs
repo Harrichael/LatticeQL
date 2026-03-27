@@ -570,6 +570,24 @@ impl ConnectionManager {
         map
     }
 
+    /// Render a URL safe for display by masking the password.
+    /// `mysql://user:secret@host/db` → `mysql://user:***@host/db`
+    pub fn display_url(url: &str) -> String {
+        // MySQL URLs: scheme://user:pass@host:port/db
+        if let Some(at_pos) = url.find('@') {
+            if let Some(colon_pos) = url[..at_pos].rfind(':') {
+                // Check there's a scheme:// before the user:pass
+                if let Some(slash_pos) = url.find("://") {
+                    if colon_pos > slash_pos + 3 {
+                        // There's a password between colon and @
+                        return format!("{}***{}", &url[..colon_pos + 1], &url[at_pos..]);
+                    }
+                }
+            }
+        }
+        url.to_string()
+    }
+
     /// Derive an alias from a database URL.
     pub fn alias_from_url(url: &str) -> String {
         if url.starts_with("sqlite://") || url.starts_with("sqlite:") {
@@ -626,7 +644,7 @@ impl ConnectionManager {
             .map(|c| ConnectionSummary {
                 alias: c.alias.clone(),
                 conn_type: c.conn_type.label().to_string(),
-                url: c.url.clone(),
+                url: Self::display_url(&c.url),
                 status: c.status.clone(),
                 table_count: c.original_tables.len(),
                 last_table_count: c.last_table_count,
