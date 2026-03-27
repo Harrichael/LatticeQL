@@ -142,42 +142,63 @@ impl Engine {
                 break;
             }
 
-            // --- Query phase ---
+            // --- Query phase (chunked to avoid exceeding DB limits) ---
+            const CHUNK_SIZE: usize = 500;
             let unique_fks: Vec<String> = fk_entries
                 .iter()
                 .map(|(_, v)| v.clone())
                 .collect::<std::collections::HashSet<_>>()
                 .into_iter()
                 .collect();
-            let in_clause = unique_fks.join(", ");
-            let sql = if let Some(extra) = &step.target_extra_where {
-                format!(
-                    "SELECT * FROM {} WHERE {} IN ({}) AND {}",
-                    step.to_table, step.to_column, in_clause, extra
-                )
-            } else {
-                format!(
-                    "SELECT * FROM {} WHERE {} IN ({})",
-                    step.to_table, step.to_column, in_clause
-                )
-            };
-            let rows = db.query(&sql).await?;
-            total += rows.len();
-            crate::log::info(format!(
-                "Traversal step {}/{}: {} — {} row(s) returned",
-                step_idx + 1,
-                path.steps.len(),
-                sql,
-                rows.len()
-            ));
 
-            // Group rows by their to_column value
             let mut grouped: HashMap<Value, Vec<Row>> = HashMap::new();
-            for row in rows {
-                if let Some(key) = row.get(&step.to_column) {
-                    grouped.entry(key.clone()).or_default().push(row);
+            let mut step_row_count = 0;
+
+            for chunk in unique_fks.chunks(CHUNK_SIZE) {
+                let in_clause = chunk.join(", ");
+                let sql = if let Some(extra) = &step.target_extra_where {
+                    format!(
+                        "SELECT * FROM {} WHERE {} IN ({}) AND {}",
+                        step.to_table, step.to_column, in_clause, extra
+                    )
+                } else {
+                    format!(
+                        "SELECT * FROM {} WHERE {} IN ({})",
+                        step.to_table, step.to_column, in_clause
+                    )
+                };
+                let rows = db.query(&sql).await?;
+                step_row_count += rows.len();
+                for row in rows {
+                    if let Some(key) = row.get(&step.to_column) {
+                        grouped.entry(key.clone()).or_default().push(row);
+                    }
                 }
             }
+
+            total += step_row_count;
+            let chunks_used = (unique_fks.len() + CHUNK_SIZE - 1) / CHUNK_SIZE;
+            let id_summary = if unique_fks.len() <= 5 {
+                unique_fks.join(", ")
+            } else {
+                format!(
+                    "{}, ... +{} more",
+                    unique_fks[..3].join(", "),
+                    unique_fks.len() - 3
+                )
+            };
+            crate::log::info(format!(
+                "Traversal step {}/{}: {} → {} WHERE {} IN ({}) — {} ID(s), {} chunk(s), {} row(s)",
+                step_idx + 1,
+                path.steps.len(),
+                step.from_table,
+                step.to_table,
+                step.to_column,
+                id_summary,
+                unique_fks.len(),
+                chunks_used,
+                step_row_count,
+            ));
 
             // --- Attach phase (mutable) ---
             let mut next_frontier: Vec<NodeAddr> = Vec::new();
