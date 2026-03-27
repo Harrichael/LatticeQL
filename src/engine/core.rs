@@ -694,4 +694,44 @@ mod tests {
             "users to products should reach users nested under departments"
         );
     }
+
+    #[tokio::test]
+    async fn test_find_paths_via_single_table() {
+        // Schema: users → orders → order_items → products
+        // Via ["orders"] should find paths that pass through orders.
+        let db = setup_test_db().await;
+        let schema = crate::schema::Schema::explore(&db).await.unwrap();
+
+        let via = vec!["orders".to_string()];
+        let r = find_paths(&schema, "users", "products", &via, 1, MAX_PATH_DEPTH);
+
+        assert!(!r.paths.is_empty(), "Should find at least one path via orders");
+        for p in &r.paths {
+            let tables: Vec<&str> = p.steps.iter().map(|s| s.from_table.as_str()).collect();
+            assert!(
+                tables.contains(&"orders"),
+                "Every path must pass through 'orders', got: {:?}", tables
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_find_paths_via_two_tables_order_sensitive() {
+        // Schema: users → orders → order_items → products
+        // The valid path traverses orders THEN order_items.
+        let db = setup_test_db().await;
+        let schema = crate::schema::Schema::explore(&db).await.unwrap();
+
+        // Correct order: ["orders", "order_items"] — matches the traversal
+        let via_correct = vec!["orders".to_string(), "order_items".to_string()];
+        let r_correct = find_paths(&schema, "users", "products", &via_correct, 1, MAX_PATH_DEPTH);
+        assert!(!r_correct.paths.is_empty(),
+            "Should find paths when via tables are in correct traversal order");
+
+        // Reversed order: ["order_items", "orders"] — does NOT match
+        let via_reversed = vec!["order_items".to_string(), "orders".to_string()];
+        let r_reversed = find_paths(&schema, "users", "products", &via_reversed, 1, MAX_PATH_DEPTH);
+        assert!(r_reversed.paths.is_empty(),
+            "Should find NO paths when via tables are in wrong order");
+    }
 }

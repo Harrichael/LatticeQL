@@ -243,17 +243,29 @@ fn edges_from(schema: &Schema, table: &str) -> Vec<(String, PathStep)> {
 }
 
 /// Return true if `path` passes through all `via` tables as intermediate nodes.
+/// Return true if `path` passes through all `via` tables as intermediate nodes,
+/// in the order specified. This is a subsequence check: via[0] must appear
+/// before via[1], etc., but they need not be adjacent.
 fn via_satisfied(path: &TablePath, via: &[String]) -> bool {
     if via.is_empty() {
         return true;
     }
-    let intermediates: std::collections::HashSet<&str> = path
+    let intermediates: Vec<&str> = path
         .steps
         .iter()
         .skip(1)
         .map(|s| s.from_table.as_str())
         .collect();
-    via.iter().all(|v| intermediates.contains(v.as_str()))
+    let mut via_idx = 0;
+    for table in &intermediates {
+        if *table == via[via_idx] {
+            via_idx += 1;
+            if via_idx == via.len() {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 /// Build a `TablePath` from an explicit `via` list.
