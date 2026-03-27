@@ -587,7 +587,7 @@ async fn handle_key(
                 KeyCode::Tab => {
                     let completions = rules::completions_at(
                         &state.input,
-                        &state.table_names,
+                        &state.completion_table_names(),
                         &state.table_columns,
                     );
                     if completions.len() == 1 {

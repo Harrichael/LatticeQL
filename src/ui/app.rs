@@ -350,6 +350,19 @@ impl AppState {
         }
     }
 
+    /// Return table names for command completion: includes both engine names
+    /// and display-qualified names (deduplicated, sorted).
+    pub fn completion_table_names(&self) -> Vec<String> {
+        let mut names: Vec<String> = self.table_names.clone();
+        for dn in &self.display_table_names {
+            if !names.contains(dn) {
+                names.push(dn.clone());
+            }
+        }
+        names.sort();
+        names
+    }
+
     /// Return the display-qualified form of a table name.
     pub fn display_name<'a>(&'a self, table: &'a str) -> &'a str {
         self.display_name_map

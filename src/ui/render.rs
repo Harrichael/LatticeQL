@@ -246,7 +246,7 @@ fn render_command_bar(f: &mut Frame, state: &AppState, area: Rect) {
         f.render_widget(cmd_para, rows[0]);
 
         // Completion hint line
-        let completions = completions_at(&state.input, &state.table_names, &state.table_columns);
+        let completions = completions_at(&state.input, &state.completion_table_names(), &state.table_columns);
         if !completions.is_empty() {
             let hint = format_completions(&completions);
             let hint_para = Paragraph::new(hint)
