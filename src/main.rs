@@ -332,6 +332,13 @@ async fn handle_key(
 ) -> Result<bool> {
     // The ConnectionManager implements Database, so we can use it as &dyn Database.
     let db: &dyn db::Database = conn_mgr;
+
+    // Ctrl+Z suspends regardless of current mode.
+    if key.code == KeyCode::Char('z') && key.modifiers.contains(KeyModifiers::CONTROL) {
+        state.should_suspend = true;
+        return Ok(true);
+    }
+
     // Column manager overlay has exclusive key handling while open.
     if state.column_add.is_some() {
         // Helper: get filtered indices for current search
@@ -420,9 +427,6 @@ async fn handle_key(
         Mode::Normal => {
             match key.code {
                 KeyCode::Char('q') | KeyCode::Char('Q') => return Ok(false),
-                KeyCode::Char('z') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                    state.should_suspend = true;
-                }
                 KeyCode::Char(':') => {
                     state.mode = Mode::Command;
                     state.clear_input();
@@ -598,7 +602,6 @@ async fn handle_key(
                 KeyCode::Char(c) if key.modifiers.contains(KeyModifiers::CONTROL) => {
                     match c {
                         'c' => return Ok(false),
-                        'z' => state.should_suspend = true,
                         'r' => {
                             // Enter reverse-i-search mode.
                             let saved = state.input.clone();
@@ -665,7 +668,6 @@ async fn handle_key(
                 KeyCode::Char(c) if key.modifiers.contains(KeyModifiers::CONTROL) => {
                     match c {
                         'c' => return Ok(false),
-                        'z' => state.should_suspend = true,
                         'r' => {
                             // Ctrl+R again: advance to the next older match.
                             state.mode = Mode::CommandSearch {
