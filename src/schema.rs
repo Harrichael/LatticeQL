@@ -148,14 +148,15 @@ pub fn find_paths(
     let mut results: Vec<TablePath> = Vec::new();
     let mut init_visited = std::collections::HashSet::new();
     init_visited.insert(from.to_string());
+    let mut path_buf = Vec::new();
 
     for depth in start_depth..=max_depth {
         dfs_at_depth(
             schema,
             from,
             to,
-            &[],
-            &init_visited,
+            &mut path_buf,
+            &mut init_visited,
             depth,
             via,
             &mut results,
@@ -179,19 +180,22 @@ pub fn find_paths(
 
 /// Depth-limited DFS: find all paths of exactly `remaining_depth` steps from
 /// `current` to `target`, appending valid ones to `results`.
+///
+/// Uses push/pop on mutable `path_so_far` and `visited` to avoid cloning at
+/// every recursive call.
 fn dfs_at_depth(
     schema: &Schema,
     current: &str,
     target: &str,
-    path_so_far: &[PathStep],
-    visited: &std::collections::HashSet<String>,
+    path_so_far: &mut Vec<PathStep>,
+    visited: &mut std::collections::HashSet<String>,
     remaining_depth: usize,
     via: &[String],
     results: &mut Vec<TablePath>,
 ) {
     if remaining_depth == 0 {
         if current == target {
-            let candidate = TablePath { steps: path_so_far.to_vec() };
+            let candidate = TablePath { steps: path_so_far.clone() };
             if via_satisfied(&candidate, via) {
                 results.push(candidate);
             }
@@ -203,20 +207,20 @@ fn dfs_at_depth(
         if visited.contains(&next_table) {
             continue;
         }
-        let mut new_path = path_so_far.to_vec();
-        new_path.push(step);
-        let mut new_visited = visited.clone();
-        new_visited.insert(next_table.clone());
+        path_so_far.push(step);
+        visited.insert(next_table.clone());
         dfs_at_depth(
             schema,
             &next_table,
             target,
-            &new_path,
-            &new_visited,
+            path_so_far,
+            visited,
             remaining_depth - 1,
             via,
             results,
         );
+        visited.remove(&next_table);
+        path_so_far.pop();
     }
 }
 
