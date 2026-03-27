@@ -147,7 +147,7 @@ impl Engine {
             let unique_fks: Vec<String> = fk_entries
                 .iter()
                 .map(|(_, v)| v.clone())
-                .collect::<std::collections::HashSet<_>>()
+                .collect::<std::collections::BTreeSet<_>>()
                 .into_iter()
                 .collect();
 
