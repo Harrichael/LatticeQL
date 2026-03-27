@@ -59,6 +59,8 @@ async fn main() -> Result<()> {
     let mut state = AppState::new();
     state.table_names = table_names;
     state.connections_summary = conn_mgr.connection_summaries();
+    state.display_table_names = conn_mgr.display_table_names();
+    state.display_name_map = conn_mgr.display_name_map();
     let defaults = config::load_config()?;
     state.default_visible_columns = defaults.columns.global;
     state.default_visible_columns_by_table = defaults.columns.per_table;
@@ -319,6 +321,8 @@ fn refresh_schema_from_conn_mgr(
         })
         .collect();
     state.connections_summary = conn_mgr.connection_summaries();
+    state.display_table_names = conn_mgr.display_table_names();
+    state.display_name_map = conn_mgr.display_name_map();
 }
 
 /// Returns `false` when the application should quit.
@@ -968,7 +972,7 @@ async fn handle_key(
 
             // Build the dropdown items for the currently active field.
             let dropdown_items: Vec<String> = match &form.active_field {
-                VirtualFkField::FromTable | VirtualFkField::ToTable => state.table_names.clone(),
+                VirtualFkField::FromTable | VirtualFkField::ToTable => state.display_table_names.clone(),
                 VirtualFkField::IdColumn => {
                     state.table_columns.get(&form.from_table).cloned().unwrap_or_default()
                 }

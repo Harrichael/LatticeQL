@@ -304,6 +304,10 @@ pub struct AppState {
     pub should_suspend: bool,
     /// Connection summaries for the connection manager overlay.
     pub connections_summary: Vec<crate::connection_manager::ConnectionSummary>,
+    /// Fully-qualified table names for display (always prefixed when multi-connection).
+    pub display_table_names: Vec<String>,
+    /// Maps engine table names to display-qualified names (e.g. "users" → "ecommerce.users").
+    pub display_name_map: HashMap<String, String>,
 }
 
 impl AppState {
@@ -341,7 +345,17 @@ impl AppState {
             history_draft: String::new(),
             should_suspend: false,
             connections_summary: Vec::new(),
+            display_table_names: Vec::new(),
+            display_name_map: HashMap::new(),
         }
+    }
+
+    /// Return the display-qualified form of a table name.
+    pub fn display_name<'a>(&'a self, table: &'a str) -> &'a str {
+        self.display_name_map
+            .get(table)
+            .map(|s| s.as_str())
+            .unwrap_or(table)
     }
 
     pub fn configured_defaults_for_table(&self, table: &str) -> &[String] {

@@ -91,7 +91,7 @@ pub fn render(f: &mut Frame, state: &mut AppState, roots: &[DataNode]) {
 
 fn render_schema(f: &mut Frame, state: &AppState, area: Rect) {
     let items: Vec<ListItem> = state
-        .table_names
+        .display_table_names
         .iter()
         .map(|t| ListItem::new(Span::raw(t.clone())))
         .collect();
@@ -156,7 +156,7 @@ fn render_data_viewer(
                 })
                 .collect::<Vec<_>>()
                 .join("  │  ");
-            let table_label = format!("[{}]", node.table);
+            let table_label = format!("[{}]", state.display_name(&node.table));
             let line = Line::from(vec![
                 Span::raw(indent),
                 Span::raw(arrow),
@@ -586,18 +586,20 @@ fn render_virtual_fk_manager(f: &mut Frame, state: &mut AppState) {
             .skip(offset)
             .take(inner_height)
             .map(|(fi, (_, vfk))| {
+                let from = state.display_name(&vfk.from_table);
+                let to = state.display_name(&vfk.to_table);
                 let text = if let (Some(tc), Some(tv)) = (&vfk.type_column, &vfk.type_value) {
                     format!(
                         "  {}.{} = '{}' → {}.{}  (via {}.{})",
-                        vfk.from_table, tc, tv,
-                        vfk.to_table, vfk.to_column,
-                        vfk.from_table, vfk.id_column,
+                        from, tc, tv,
+                        to, vfk.to_column,
+                        from, vfk.id_column,
                     )
                 } else {
                     format!(
                         "  {}.{} → {}.{}",
-                        vfk.from_table, vfk.id_column,
-                        vfk.to_table, vfk.to_column,
+                        from, vfk.id_column,
+                        to, vfk.to_column,
                     )
                 };
                 let item = ListItem::new(text);
@@ -747,7 +749,7 @@ fn render_vfk_form_header(f: &mut Frame, form: &VirtualFkForm, area: Rect) {
 fn render_vfk_form_dropdown(f: &mut Frame, state: &mut AppState, form: &VirtualFkForm, area: Rect) {
     // Build the items for the active field
     let items: Vec<String> = match &form.active_field {
-        VirtualFkField::FromTable | VirtualFkField::ToTable => state.table_names.clone(),
+        VirtualFkField::FromTable | VirtualFkField::ToTable => state.display_table_names.clone(),
         VirtualFkField::IdColumn => {
             state.table_columns.get(&form.from_table).cloned().unwrap_or_default()
         }

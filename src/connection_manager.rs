@@ -498,6 +498,78 @@ impl ConnectionManager {
             .unwrap_or_else(|| qualified.to_string())
     }
 
+    /// Return a sorted list of fully-qualified table names (`alias.table`)
+    /// for display purposes. Always includes the connection prefix, even for
+    /// unique tables, when there are 2+ connected databases.
+    pub fn display_table_names(&self) -> Vec<String> {
+        let connected: Vec<&ManagedConnection> = self.connections.iter()
+            .filter(|c| c.status.is_connected())
+            .collect();
+        if connected.len() <= 1 {
+            // Single connection: bare names are fine.
+            let mut names: Vec<String> = connected.iter()
+                .flat_map(|c| c.original_tables.iter().cloned())
+                .collect();
+            names.sort();
+            names
+        } else {
+            let mut names: Vec<String> = connected.iter()
+                .flat_map(|c| {
+                    c.original_tables.iter().map(move |t| format!("{}.{}", c.alias, t))
+                })
+                .collect();
+            names.sort();
+            names
+        }
+    }
+
+    /// Return the fully-qualified display form of a table name.
+    /// With multiple connections, always returns `alias.table`.
+    /// With one connection, returns the bare name.
+    pub fn display_name_for_table(&self, table: &str) -> String {
+        let connected_count = self.connections.iter()
+            .filter(|c| c.status.is_connected())
+            .count();
+        if connected_count <= 1 {
+            return table.to_string();
+        }
+        // Already qualified?
+        if table.contains('.') {
+            return table.to_string();
+        }
+        // Look up which connection owns this bare table name.
+        if let Some(&idx) = self.table_to_conn.get(table) {
+            format!("{}.{}", self.connections[idx].alias, table)
+        } else {
+            table.to_string()
+        }
+    }
+
+    /// Return a mapping from engine table names to fully-qualified display names.
+    pub fn display_name_map(&self) -> HashMap<String, String> {
+        let connected: Vec<&ManagedConnection> = self.connections.iter()
+            .filter(|c| c.status.is_connected())
+            .collect();
+        let mut map = HashMap::new();
+        if connected.len() <= 1 {
+            // Single connection: identity mapping.
+            for conn in &connected {
+                for t in &conn.original_tables {
+                    map.insert(t.clone(), t.clone());
+                }
+            }
+        } else {
+            // Multiple connections: always qualify.
+            for (engine_name, &idx) in &self.table_to_conn {
+                let alias = &self.connections[idx].alias;
+                let original = self.original_table_name(engine_name);
+                let display = format!("{}.{}", alias, original);
+                map.insert(engine_name.clone(), display);
+            }
+        }
+        map
+    }
+
     /// Derive an alias from a database URL.
     pub fn alias_from_url(url: &str) -> String {
         if url.starts_with("sqlite://") || url.starts_with("sqlite:") {
