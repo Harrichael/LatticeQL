@@ -1,3 +1,4 @@
+mod app;
 mod command_history;
 mod config;
 mod connection_manager;
