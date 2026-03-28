@@ -204,10 +204,10 @@ fn render_data_viewer(
     };
 
     let title = if flat.is_empty() {
-        " Data Viewer (empty — type ':' to enter a command) ".to_string()
+        " Data Playground ".to_string()
     } else {
         format!(
-            " Data Viewer [{}/{}] ",
+            " Data Playground [{}/{}] ",
             state.selected_row + 1,
             flat.len()
         )
@@ -283,12 +283,26 @@ fn render_command_bar(f: &mut Frame, state: &AppState, area: Rect) {
 
         // Filtered command list
         let filter = state.input.to_lowercase();
-        let filtered: Vec<String> = PALETTE_COMMANDS.iter()
-            .filter(|(name, _)| filter.is_empty() || name.starts_with(&filter))
-            .map(|(name, desc)| format!("{} — {}", name, desc))
+        let filtered: Vec<(&str, &str, &str)> = PALETTE_COMMANDS.iter()
+            .filter(|(name, _, _)| filter.is_empty() || name.starts_with(&filter))
+            .copied()
             .collect();
         if !filtered.is_empty() {
-            let hint = format!(" {}", filtered.join("  ·  "));
+            let hint = if filtered.len() <= 2 {
+                let parts: Vec<String> = filtered.iter()
+                    .map(|(name, key, desc)| if key.is_empty() {
+                        format!("{} — {}", name, desc)
+                    } else {
+                        format!("{} ({}) — {}", name, key, desc)
+                    })
+                    .collect();
+                format!(" {}", parts.join("  ·  "))
+            } else {
+                let parts: Vec<String> = filtered.iter()
+                    .map(|(name, key, _)| if key.is_empty() { name.to_string() } else { format!("{} ({})", name, key) })
+                    .collect();
+                format!(" {}", parts.join("  ·  "))
+            };
             let hint_para = Paragraph::new(hint)
                 .style(Style::default().fg(Color::DarkGray));
             f.render_widget(hint_para, rows[1]);
@@ -370,7 +384,7 @@ fn format_completions(completions: &[Completion]) -> String {
             Completion::QuotedValue => "'<value>'".to_string(),
         })
         .collect();
-    let mut text = format!(" {}", parts.join("  ·  "));
+    let mut text = parts.join("  ·  ");
     if total > MAX_SHOW {
         text.push_str(&format!("  +{} more", total - MAX_SHOW));
     }

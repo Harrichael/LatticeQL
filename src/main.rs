@@ -656,8 +656,8 @@ async fn handle_key(
                     state.clear_input();
                     // Find first command whose name starts with the filter.
                     let matched = PALETTE_COMMANDS.iter()
-                        .find(|(name, _)| name.starts_with(&filter));
-                    match matched.map(|(name, _)| *name) {
+                        .find(|(name, _, _)| name.starts_with(&filter));
+                    match matched.map(|(name, _, _)| *name) {
                         Some("quit") => return Ok(false),
                         Some("schema") => {
                             state.show_schema = !state.show_schema;
@@ -678,11 +678,11 @@ async fn handle_key(
                             }
                             state.mode = Mode::Normal;
                         }
-                        Some("relations") => {
+                        Some("lattice") => {
                             state.reset_overlay_search();
                             state.mode = Mode::VirtualFkManager { cursor: 0 };
                         }
-                        Some("reorder") => {
+                        Some("rules") => {
                             if !engine.rules.is_empty() {
                                 state.rules = engine.rules.clone();
                                 state.rule_cursor = 0;
@@ -706,7 +706,7 @@ async fn handle_key(
                         Some("logs") => {
                             state.mode = Mode::LogViewer { cursor: state.logs.len().saturating_sub(1) };
                         }
-                        Some("help") => {
+                        Some("manuals") => {
                             state.mode = Mode::ManualList { cursor: 0 };
                         }
                         Some("prune") => {

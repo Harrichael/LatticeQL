@@ -6,17 +6,17 @@ use crate::schema::VirtualFkDef;
 use std::collections::HashMap;
 
 /// Commands available in the command palette (`:` key).
-/// Each entry is (name, description).
-pub const PALETTE_COMMANDS: &[(&str, &str)] = &[
-    ("columns", "Manage visible columns"),
-    ("connections", "Manage database connections"),
-    ("help", "Browse manuals"),
-    ("logs", "View log messages"),
-    ("prune", "Remove selected node"),
-    ("quit", "Exit application"),
-    ("relations", "Manage virtual foreign keys"),
-    ("reorder", "Reorder rules"),
-    ("schema", "Toggle schema sidebar"),
+/// Each entry is (name, shortcut key or "", description).
+pub const PALETTE_COMMANDS: &[(&str, &str, &str)] = &[
+    ("connections", "+", "Connection manager"),
+    ("columns",     "c", "Column Manager"),
+    ("lattice",     "v", "Manage virtual lattice keys"),
+    ("rules",       "r", "Query Rules"),
+    ("prune",       "x", "Remove selected node from Data Playground"),
+    ("manuals",     "m", "Browse manuals"),
+    ("logs",        "l", "View log messages"),
+    ("quit",        "q", "Exit application"),
+    ("schema",      "s", "Toggle schema sidebar"),
 ];
 
 /// Which field is active in the virtual FK creation form.
