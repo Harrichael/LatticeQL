@@ -5,6 +5,20 @@ use crate::engine::TablePath;
 use crate::schema::VirtualFkDef;
 use std::collections::HashMap;
 
+/// Commands available in the command palette (`:` key).
+/// Each entry is (name, description).
+pub const PALETTE_COMMANDS: &[(&str, &str)] = &[
+    ("columns", "Manage visible columns"),
+    ("connections", "Manage database connections"),
+    ("help", "Browse manuals"),
+    ("logs", "View log messages"),
+    ("prune", "Remove selected node"),
+    ("quit", "Exit application"),
+    ("relations", "Manage virtual foreign keys"),
+    ("reorder", "Reorder rules"),
+    ("schema", "Toggle schema sidebar"),
+];
+
 /// Which field is active in the virtual FK creation form.
 #[derive(Debug, Clone, PartialEq)]
 pub enum VirtualFkField {
@@ -120,10 +134,12 @@ impl Default for VirtualFkForm {
 /// All possible modes the UI can be in.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Mode {
-    /// Normal navigation mode.
+    /// Normal navigation mode — also shows the query bar (ready for input).
     Normal,
-    /// User is typing a command.
-    Command,
+    /// User is typing a query (rule).
+    Query,
+    /// User is browsing the command palette (`:` key).
+    CommandPalette,
     /// User is being asked to pick among multiple paths.
     PathSelection,
     /// User is reordering rules.
