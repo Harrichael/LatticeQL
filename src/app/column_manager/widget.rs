@@ -1,6 +1,8 @@
-use crate::ui::app::ColumnManagerItem;
+use super::service::ColumnManagerItem;
 
-pub struct ColumnManagerPanel {
+/// Temporary TUI overlay state for the column manager interaction.
+/// Created by `ColumnManager::open_widget()`, lives while the overlay is open.
+pub struct ColumnManagerWidget {
     pub table: String,
     pub items: Vec<ColumnManagerItem>,
     pub cursor: usize,
@@ -11,7 +13,7 @@ pub struct ColumnManagerPanel {
     pub closed: bool,
 }
 
-impl ColumnManagerPanel {
+impl ColumnManagerWidget {
     pub fn new(table: String, items: Vec<ColumnManagerItem>) -> Self {
         Self {
             table,

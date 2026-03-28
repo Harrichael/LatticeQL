@@ -270,13 +270,6 @@ pub struct ConnectionFormField {
     pub required: bool,
 }
 
-/// Working item in column manager overlay.
-#[derive(Debug, Clone)]
-pub struct ColumnManagerItem {
-    pub name: String,
-    pub enabled: bool,
-}
-
 /// Application state, passed to the renderer.
 pub struct AppState {
     pub mode: Mode,
@@ -314,16 +307,10 @@ pub struct AppState {
     pub show_schema: bool,
     /// Column names per table, for command completion hints.
     pub table_columns: HashMap<String, Vec<String>>,
-    /// Tree-level visible columns by table.
-    pub tree_visible_columns: HashMap<String, Vec<String>>,
-    /// Full tree-level column ordering by table (enabled + disabled).
-    pub tree_column_order: HashMap<String, Vec<String>>,
-    /// Column manager mode: table, editable list (ordered + enabled), cursor.
-    pub column_add: Option<(String, Vec<ColumnManagerItem>, usize)>,
-    /// Config-driven default visible columns.
-    pub default_visible_columns: Vec<String>,
-    /// Config-driven table-specific default visible columns.
-    pub default_visible_columns_by_table: HashMap<String, Vec<String>>,
+    /// Column visibility manager (persistent service).
+    pub column_manager: crate::app::column_manager::service::ColumnManagerService,
+    /// Column manager overlay state, if open.
+    pub column_add: Option<crate::app::column_manager::widget::ColumnManagerWidget>,
     /// Virtual FK definitions managed by the user.
     pub virtual_fks: Vec<VirtualFkDef>,
     /// Internal log history (warnings, errors, info messages).
@@ -374,11 +361,8 @@ impl AppState {
             rule_reorder_redo: Vec::new(),
             show_schema: false,
             table_columns: HashMap::new(),
-            tree_visible_columns: HashMap::new(),
-            tree_column_order: HashMap::new(),
+            column_manager: crate::app::column_manager::service::ColumnManagerService::new(vec![], std::collections::HashMap::new()),
             column_add: None,
-            default_visible_columns: vec![],
-            default_visible_columns_by_table: HashMap::new(),
             virtual_fks: Vec::new(),
             logs: Vec::new(),
             overlay_scroll: 0,
@@ -414,12 +398,6 @@ impl AppState {
             .get(table)
             .map(|s| s.as_str())
             .unwrap_or(table)
-    }
-
-    pub fn configured_defaults_for_table(&self, table: &str) -> &[String] {
-        self.default_visible_columns_by_table
-            .get(table)
-            .unwrap_or(&self.default_visible_columns)
     }
 
     /// Move selection up.

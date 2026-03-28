@@ -21,8 +21,12 @@ use ratatui::{Terminal, backend::CrosstermBackend};
 use rules::Completion;
 
 use std::io;
+use app::column_manager::service::ColumnManagerService;
+use app::model::SchemaNode;
 use connection_manager::{ConnectionManager, ConnectionType};
-use ui::app::{AppState, ColumnManagerItem, ConfirmAction, ConnectionForm, ConnectionManagerTab, Mode, PALETTE_COMMANDS, VirtualFkField, VirtualFkForm};
+use ui::app::{AppState, ConfirmAction, ConnectionForm, ConnectionManagerTab, Mode, PALETTE_COMMANDS, VirtualFkField, VirtualFkForm};
+use ui::model::control_panel::dispatch;
+use ui::model::keys::{from_key_event, EntityFocus, InputFocus, UserFocusLoci};
 use schema::VirtualFkDef;
 
 /// LatticeQL — Navigate complex datasets from multiple sources intuitively.
@@ -71,8 +75,11 @@ async fn main() -> Result<()> {
     state.connections_summary = conn_mgr.connection_summaries(&saved_ids(&state));
     state.display_table_names = conn_mgr.display_table_names();
     state.display_name_map = conn_mgr.display_name_map();
-    state.default_visible_columns = defaults.columns.global;
-    state.default_visible_columns_by_table = defaults.columns.per_table;
+    state.column_manager = ColumnManagerService::new(defaults.columns.global, defaults.columns.per_table);
+    // Register all known schema nodes with the column manager.
+    for (_name, info) in &engine.schema.tables {
+        state.column_manager.register_node(&SchemaNode::from_table_info(info));
+    }
     let history_max_len = defaults.history_max_len;
     // Inject virtual FKs from config.
     for vfk in defaults.virtual_fks {
@@ -222,91 +229,6 @@ fn columns_for_table(roots: &[engine::DataNode], table: &str) -> Vec<String> {
     found.unwrap_or_default()
 }
 
-fn ensure_tree_visibility_for_node(state: &mut AppState, node: &engine::DataNode) {
-    fn default_tree_columns(
-        configured_defaults: &[String],
-        node: &engine::DataNode,
-    ) -> Vec<String> {
-        let mut all_cols: Vec<String> = node.row.keys().cloned().collect();
-        all_cols.sort();
-        let mut visible: Vec<String> = configured_defaults
-            .iter()
-            .filter_map(|c| {
-                if all_cols.iter().any(|k| k == c) {
-                    Some(c.clone())
-                } else {
-                    None
-                }
-            })
-            .collect();
-        visible
-    }
-
-    let configured_defaults = state
-        .configured_defaults_for_table(&node.table)
-        .to_vec();
-    let default_cols = default_tree_columns(&configured_defaults, node);
-
-    state
-        .tree_visible_columns
-        .entry(node.table.clone())
-        .or_insert_with(|| default_cols.clone());
-    state
-        .tree_column_order
-        .entry(node.table.clone())
-        .or_insert_with(|| {
-            let mut all_cols: Vec<String> = node.row.keys().cloned().collect();
-            all_cols.sort();
-            let defaults = default_cols.clone();
-            let default_set: std::collections::HashSet<String> =
-                defaults.iter().cloned().collect();
-
-            let mut ordered = defaults;
-            for c in all_cols {
-                if !default_set.contains(&c) {
-                    ordered.push(c);
-                }
-            }
-            ordered
-        });
-}
-
-fn column_manager_items_for_table(
-    state: &AppState,
-    roots: &[engine::DataNode],
-    table: &str,
-) -> Vec<ColumnManagerItem> {
-    let all_cols = columns_for_table(roots, table);
-    let shown = state
-        .tree_visible_columns
-        .get(table)
-        .cloned()
-        .unwrap_or_default();
-    let mut ordered = state
-        .tree_column_order
-        .get(table)
-        .cloned()
-        .unwrap_or_default();
-
-    for c in &all_cols {
-        if !ordered.contains(c) {
-            ordered.push(c.clone());
-        }
-    }
-    ordered.retain(|c| all_cols.contains(c));
-
-    let shown_set: std::collections::HashSet<String> =
-        shown.iter().cloned().collect();
-
-    ordered
-        .into_iter()
-        .map(|name| ColumnManagerItem {
-            enabled: shown_set.contains(&name),
-            name,
-        })
-        .collect()
-}
-
 /// Compute the set of saved connection IDs for is_saved checks.
 fn saved_ids(state: &AppState) -> std::collections::HashSet<String> {
     state.saved_connections.iter().map(|s| s.id.clone()).collect()
@@ -334,6 +256,10 @@ fn refresh_schema_from_conn_mgr(
             (name.clone(), cols)
         })
         .collect();
+    // Register any new schema nodes with the column manager.
+    for (_name, info) in &engine.schema.tables {
+        state.column_manager.register_node(&SchemaNode::from_table_info(info));
+    }
     state.connections_summary = conn_mgr.connection_summaries(&saved_ids(state));
     state.display_table_names = conn_mgr.display_table_names();
     state.display_name_map = conn_mgr.display_name_map();
@@ -358,84 +284,19 @@ async fn handle_key(
     }
 
     // Column manager overlay has exclusive key handling while open.
-    if state.column_add.is_some() {
-        // Helper: get filtered indices for current search
-        let filtered: Vec<usize> = if let Some((_, ref items, _)) = state.column_add {
-            let q = state.overlay_search.to_lowercase();
-            items.iter().enumerate()
-                .filter(|(_, it)| q.is_empty() || it.name.to_lowercase().contains(&q))
-                .map(|(i, _)| i)
-                .collect()
-        } else { vec![] };
-
-        match key.code {
-            // Navigation always fires
-            KeyCode::Up | KeyCode::Char('k') => {
-                if let Some((_, _, ref mut cursor)) = state.column_add {
-                    if *cursor > 0 { *cursor -= 1; }
-                }
+    if let Some(ref mut panel) = state.column_add {
+        let focus = UserFocusLoci {
+            input: if panel.search_active { InputFocus::Search } else { InputFocus::None },
+            entity: EntityFocus::Editable,
+        };
+        if let Some(event) = from_key_event(key, &focus) {
+            dispatch(panel, event);
+        }
+        if panel.closed {
+            if panel.confirmed {
+                state.column_manager.apply_widget(panel);
             }
-            KeyCode::Down | KeyCode::Char('j') => {
-                if let Some((_, _, ref mut cursor)) = state.column_add {
-                    let max = filtered.len().saturating_sub(1);
-                    if *cursor < max { *cursor += 1; }
-                }
-            }
-            KeyCode::Char('u') if state.overlay_search.is_empty() => {
-                if let Some((_, ref mut items, ref mut cursor)) = state.column_add {
-                    if *cursor > 0 { items.swap(*cursor, *cursor - 1); *cursor -= 1; }
-                }
-            }
-            KeyCode::Char('d') if state.overlay_search.is_empty() => {
-                if let Some((_, ref mut items, ref mut cursor)) = state.column_add {
-                    if *cursor + 1 < items.len() { items.swap(*cursor, *cursor + 1); *cursor += 1; }
-                }
-            }
-            KeyCode::Char(' ') | KeyCode::Char('x') => {
-                if let Some((_, ref mut items, cursor)) = state.column_add {
-                    if let Some(&orig_idx) = filtered.get(cursor) {
-                        if let Some(item) = items.get_mut(orig_idx) { item.enabled = !item.enabled; }
-                    }
-                }
-            }
-            KeyCode::Enter => {
-                if let Some((table, ref items, _)) = state.column_add.clone() {
-                    let enabled: Vec<String> = items.iter().filter(|i| i.enabled).map(|i| i.name.clone()).collect();
-                    state.tree_visible_columns.insert(table.clone(), enabled);
-                    state.tree_column_order.insert(table, items.iter().map(|i| i.name.clone()).collect());
-                }
-                state.reset_overlay_search();
-                state.column_add = None;
-            }
-            // Activate search
-            KeyCode::Char('/') if !state.overlay_search_active => {
-                state.overlay_search_active = true;
-            }
-            // Esc: 3-level exit
-            KeyCode::Esc => {
-                if state.overlay_search_active {
-                    state.overlay_search_active = false;
-                } else if !state.overlay_search.is_empty() {
-                    state.overlay_search.clear();
-                    state.overlay_scroll = 0;
-                    if let Some((_, _, ref mut cursor)) = state.column_add { *cursor = 0; }
-                } else {
-                    state.reset_overlay_search();
-                    state.column_add = None;
-                }
-            }
-            // Search input when active
-            KeyCode::Backspace if state.overlay_search_active => {
-                state.overlay_search.pop();
-                state.overlay_scroll = 0;
-                if let Some((_, _, ref mut cursor)) = state.column_add { *cursor = 0; }
-            }
-            KeyCode::Char(c) if state.overlay_search_active => {
-                state.overlay_search.push(c);
-                state.overlay_scroll = 0;
-                if let Some((_, _, ref mut cursor)) = state.column_add { *cursor = 0; }
-            }
-            _ => {}
+            state.column_add = None;
         }
         return Ok(true);
     }
@@ -676,13 +537,10 @@ async fn handle_key(
                             let flat = flatten_tree(&engine.roots);
                             if state.selected_row < flat.len() {
                                 let (_, node) = flat[state.selected_row];
-                                ensure_tree_visibility_for_node(state, node);
-                                let items = column_manager_items_for_table(
-                                    state, &engine.roots, &node.table,
-                                );
-                                if !items.is_empty() {
-                                    state.reset_overlay_search();
-                                    state.column_add = Some((node.table.clone(), items, 0));
+                                let available = columns_for_table(&engine.roots, &node.table);
+                                let panel = state.column_manager.open_widget(&node.table, &available);
+                                if !panel.items.is_empty() {
+                                    state.column_add = Some(panel);
                                 }
                             }
                             state.mode = Mode::Normal;

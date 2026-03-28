@@ -1,9 +1,9 @@
 use crossterm::event::{KeyCode, KeyEvent};
 
-use super::panel::ColumnManagerPanel;
+use super::widget::ColumnManagerWidget;
 use crate::ui::model::control_panel::ControlPanel;
 
-impl ControlPanel for ColumnManagerPanel {
+impl ControlPanel for ColumnManagerWidget {
     fn on_navigate_up(&mut self) {
         if self.cursor > 0 {
             self.cursor -= 1;
@@ -87,7 +87,7 @@ impl ControlPanel for ColumnManagerPanel {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ui::app::ColumnManagerItem;
+    use crate::app::column_manager::service::ColumnManagerItem;
 
     fn items(names: &[&str]) -> Vec<ColumnManagerItem> {
         names
@@ -99,8 +99,8 @@ mod tests {
             .collect()
     }
 
-    fn panel(names: &[&str]) -> ColumnManagerPanel {
-        ColumnManagerPanel::new("test_table".into(), items(names))
+    fn panel(names: &[&str]) -> ColumnManagerWidget {
+        ColumnManagerWidget::new("test_table".into(), items(names))
     }
 
     #[test]

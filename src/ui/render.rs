@@ -144,18 +144,12 @@ fn render_data_viewer(
             };
             let mut default_cols: Vec<String> = node.row.keys().cloned().collect();
             default_cols.sort();
-            let summary_cols = state
-                .tree_visible_columns
-                .get(&node.table)
-                .cloned()
-                .unwrap_or_else(|| {
-                    state
-                        .configured_defaults_for_table(&node.table)
-                        .iter()
-                        .filter(|c| default_cols.iter().any(|k| k == *c))
-                        .cloned()
-                        .collect()
-                });
+            let vis = state.column_manager.visible_columns(&node.table);
+            let summary_cols: Vec<String> = if vis.is_empty() {
+                default_cols.clone()
+            } else {
+                vis.to_vec()
+            };
             let summary = summary_cols
                 .iter()
                 .map(|c| {
@@ -507,72 +501,8 @@ fn render_rule_reorder(f: &mut Frame, state: &AppState) {
 }
 
 fn render_column_add(f: &mut Frame, state: &mut AppState) {
-    if let Some((ref table, ref items, cursor)) = state.column_add.clone() {
-        let area = centered_rect(50, 70, f.area());
-        f.render_widget(Clear, area);
-
-        // Reserve last row for search bar
-        let has_search = state.overlay_search_active || !state.overlay_search.is_empty();
-        let list_area = if has_search {
-            Rect { height: area.height.saturating_sub(3), ..area }
-        } else {
-            area
-        };
-
-        let inner_height = list_area.height.saturating_sub(2) as usize;
-
-        // Apply search filter — cursor is index into filtered list
-        let q = state.overlay_search.to_lowercase();
-        let filtered: Vec<(usize, &crate::ui::app::ColumnManagerItem)> = items.iter()
-            .enumerate()
-            .filter(|(_, it)| q.is_empty() || it.name.to_lowercase().contains(&q))
-            .collect();
-
-        // Clamp scroll: scroll only when cursor leaves visible window
-        if cursor < state.overlay_scroll {
-            state.overlay_scroll = cursor;
-        } else if cursor >= state.overlay_scroll + inner_height {
-            state.overlay_scroll = cursor + 1 - inner_height;
-        }
-        let offset = state.overlay_scroll;
-
-        let list_items: Vec<ListItem> = filtered
-            .iter()
-            .enumerate()
-            .skip(offset)
-            .take(inner_height)
-            .map(|(fi, (_, col))| {
-                let marker = if col.enabled { "[x]" } else { "[ ]" };
-                let item = ListItem::new(format!("{} {}", marker, col.name));
-                if fi == cursor {
-                    item.style(Style::default().bg(Color::Green).fg(Color::Black))
-                } else {
-                    item
-                }
-            })
-            .collect();
-
-        let match_info = if !state.overlay_search.is_empty() {
-            format!("  ({} matches)", filtered.len())
-        } else {
-            String::new()
-        };
-        let reorder_hint = if state.overlay_search.is_empty() { "  u/d reorder" } else { "" };
-        let list = List::new(list_items).block(
-            Block::default()
-                .title(format!(
-                    " Columns for '{}'{} (↑↓ nav · space/x toggle{}· /search · Enter apply · Esc) ",
-                    table, match_info, reorder_hint
-                ))
-                .borders(Borders::ALL),
-        );
-        f.render_widget(list, list_area);
-
-        // Search bar
-        if has_search {
-            let search_area = Rect { y: list_area.y + list_area.height, height: 3, ..area };
-            render_search_bar(f, search_area, &state.overlay_search.clone(), state.overlay_search_active);
-        }
+    if let Some(ref mut panel) = state.column_add {
+        crate::app::column_manager::render::render(f, panel);
     }
 }
 
@@ -1229,47 +1159,8 @@ fn render_alias_prompt(f: &mut Frame, alias: &str) {
 }
 
 /// Compute a centered rect that is `percent_x`% wide and `percent_y`% tall.
-fn render_search_bar(f: &mut Frame, area: Rect, query: &str, active: bool) {
-    let (border_color, title) = if active {
-        (Color::Yellow, " Search (Esc to stop typing, keep filter) ")
-    } else {
-        (Color::DarkGray, " Filter active (/ to edit, Esc to clear) ")
-    };
-    let text = Line::from(vec![
-        Span::styled("/ ", Style::default().fg(Color::Yellow)),
-        Span::styled(query, Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
-        if active { Span::styled("▌", Style::default().fg(Color::Yellow)) } else { Span::raw("") },
-    ]);
-    f.render_widget(
-        Paragraph::new(text).block(
-            Block::default()
-                .title(title)
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(border_color)),
-        ),
-        area,
-    );
-}
-
-fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
-    let popup_layout = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Percentage((100 - percent_y) / 2),
-            Constraint::Percentage(percent_y),
-            Constraint::Percentage((100 - percent_y) / 2),
-        ])
-        .split(r);
-
-    Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Percentage((100 - percent_x) / 2),
-            Constraint::Percentage(percent_x),
-            Constraint::Percentage((100 - percent_x) / 2),
-        ])
-        .split(popup_layout[1])[1]
-}
+// Shared render utilities re-exported from ui::model::render.
+use crate::ui::model::render::{centered_rect, render_search_bar};
 
 fn render_log_viewer(f: &mut Frame, state: &AppState) {
     let area = centered_rect(80, 70, f.area());
