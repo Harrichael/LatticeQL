@@ -6,6 +6,7 @@ use ratatui::{
 };
 
 use super::widget::ColumnManagerWidget;
+use crate::ui::model::keys::InputFocus;
 use crate::ui::model::render::{centered_rect, render_search_bar};
 
 pub fn render(f: &mut Frame, widget: &mut ColumnManagerWidget) {
@@ -13,7 +14,8 @@ pub fn render(f: &mut Frame, widget: &mut ColumnManagerWidget) {
     f.render_widget(Clear, area);
 
     // Reserve last row for search bar
-    let has_search = widget.search_active || !widget.search.is_empty();
+    let is_searching = widget.focus.input == InputFocus::Search;
+    let has_search = is_searching || !widget.search.is_empty();
     let list_area = if has_search {
         Rect { height: area.height.saturating_sub(3), ..area }
     } else {
@@ -64,6 +66,6 @@ pub fn render(f: &mut Frame, widget: &mut ColumnManagerWidget) {
     // Search bar
     if has_search {
         let search_area = Rect { y: list_area.y + list_area.height, height: 3, ..area };
-        render_search_bar(f, search_area, &widget.search, widget.search_active, widget.search_cursor);
+        render_search_bar(f, search_area, &widget.search, is_searching, widget.search_cursor);
     }
 }

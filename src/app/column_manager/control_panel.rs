@@ -2,7 +2,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use super::widget::ColumnManagerWidget;
 use crate::ui::model::control_panel::ControlPanel;
-use crate::ui::model::keys::{EntityFocus, InputFocus, UserFocusLoci};
+use crate::ui::model::keys::{InputFocus, UserFocusLoci};
 
 /// Move cursor left by one char boundary.
 fn move_left(s: &str, cursor: usize) -> usize {
@@ -65,10 +65,7 @@ fn clamp_scroll(w: &mut ColumnManagerWidget) {
 
 impl ControlPanel for ColumnManagerWidget {
     fn focus_loci(&self) -> UserFocusLoci {
-        UserFocusLoci {
-            input: if self.search_active { InputFocus::Search } else { InputFocus::None },
-            entity: EntityFocus::Editable,
-        }
+        self.focus
     }
 
     fn on_navigate_up(&mut self) {
@@ -118,12 +115,12 @@ impl ControlPanel for ColumnManagerWidget {
     }
 
     fn on_start_search(&mut self) {
-        self.search_active = true;
+        self.focus.input = InputFocus::Search;
     }
 
     fn on_back(&mut self) {
-        if self.search_active {
-            self.search_active = false;
+        if self.focus.input == InputFocus::Search {
+            self.focus.input = InputFocus::None;
         } else if !self.search.is_empty() {
             self.search.clear();
             self.search_cursor = 0;
@@ -255,11 +252,11 @@ mod tests {
     #[test]
     fn three_level_back() {
         let mut p = widget(&["id"]);
-        p.search_active = true;
+        p.focus.input = InputFocus::Search;
         p.search = "foo".into();
 
         p.on_back(); // level 1: deactivate search
-        assert!(!p.search_active);
+        assert_eq!(p.focus.input, InputFocus::None);
         assert_eq!(p.search, "foo");
         assert!(!p.closed);
 
@@ -286,7 +283,7 @@ mod tests {
     #[test]
     fn text_input_updates_search() {
         let mut p = widget(&["id", "name"]);
-        p.search_active = true;
+        p.focus.input = InputFocus::Search;
 
         let char_n = KeyEvent::new(KeyCode::Char('n'), crossterm::event::KeyModifiers::NONE);
         let backspace = KeyEvent::new(KeyCode::Backspace, crossterm::event::KeyModifiers::NONE);
@@ -301,9 +298,9 @@ mod tests {
     #[test]
     fn start_search_activates() {
         let mut p = widget(&["id"]);
-        assert!(!p.search_active);
+        assert_eq!(p.focus.input, InputFocus::None);
         p.on_start_search();
-        assert!(p.search_active);
+        assert_eq!(p.focus.input, InputFocus::Search);
     }
 
     fn key(code: KeyCode) -> KeyEvent {

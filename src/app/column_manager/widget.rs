@@ -1,5 +1,7 @@
 use std::collections::HashSet;
 
+use crate::ui::model::keys::{EntityFocus, InputFocus, UserFocusLoci};
+
 /// Working item in the column manager overlay.
 #[derive(Debug, Clone)]
 pub struct ColumnManagerItem {
@@ -15,7 +17,7 @@ pub struct ColumnManagerWidget {
     pub cursor: usize,
     pub search: String,
     pub search_cursor: usize,
-    pub search_active: bool,
+    pub focus: UserFocusLoci,
     pub scroll: usize,
     pub viewport_height: Option<usize>,
     pub confirmed: bool,
@@ -38,7 +40,10 @@ impl ColumnManagerWidget {
             cursor: 0,
             search: String::new(),
             search_cursor: 0,
-            search_active: false,
+            focus: UserFocusLoci {
+                input: InputFocus::None,
+                entity: EntityFocus::Editable,
+            },
             scroll: 0,
             viewport_height: None,
             confirmed: false,
