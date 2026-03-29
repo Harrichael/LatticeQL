@@ -1,5 +1,4 @@
 use crate::command_history::CommandHistory;
-use crate::connection_manager::ConnectionType;
 use crate::engine::TablePath;
 use crate::schema::VirtualFkDef;
 use std::collections::HashMap;
@@ -166,20 +165,6 @@ pub enum Mode {
         /// What to do on Yes/No — stored as an opaque tag the handler interprets.
         tag: ConfirmAction,
     },
-    /// User is browsing the connection manager.
-    ConnectionManager {
-        tab: ConnectionManagerTab,
-        cursor: usize,
-    },
-    /// User is filling the connection creation form.
-    ConnectionAdd(ConnectionForm),
-    /// User is entering an alias for a saved connection before connecting.
-    SavedConnectionAlias {
-        /// Index into `state.saved_connections`.
-        saved_index: usize,
-        /// The alias being typed.
-        alias: String,
-    },
 }
 
 /// Actions that can follow a confirmation dialog.
@@ -187,80 +172,6 @@ pub enum Mode {
 pub enum ConfirmAction {
     /// Save a single connection — user decides whether to include the password.
     SaveConnectionWithPassword { conn_index: usize },
-}
-
-/// Which tab is active in the connection manager.
-#[derive(Debug, Clone, PartialEq)]
-pub enum ConnectionManagerTab {
-    /// List of active/disconnected connections.
-    Connections,
-    /// Saved connection configs (need alias before connecting).
-    Saved,
-    /// List of connector types (to start a wizard).
-    Connectors,
-}
-
-/// State for the connection creation form (single-screen, Tab-navigable fields).
-#[derive(Debug, Clone, PartialEq)]
-pub struct ConnectionForm {
-    pub conn_type: ConnectionType,
-    pub fields: Vec<ConnectionFormField>,
-    pub active_field: usize,
-}
-
-impl ConnectionForm {
-    pub fn new(conn_type: ConnectionType) -> Self {
-        let defs = conn_type.fields();
-        let fields = defs
-            .into_iter()
-            .map(|d| ConnectionFormField {
-                name: d.name,
-                label: d.label,
-                value: String::new(),
-                placeholder: d.placeholder,
-                required: d.required,
-            })
-            .collect();
-        Self {
-            conn_type,
-            fields,
-            active_field: 0,
-        }
-    }
-
-    /// Returns true when all required fields have values.
-    pub fn is_complete(&self) -> bool {
-        self.fields
-            .iter()
-            .all(|f| !f.required || !f.value.is_empty())
-    }
-
-    /// Collect field values into a HashMap for URL building.
-    pub fn values(&self) -> std::collections::HashMap<String, String> {
-        self.fields
-            .iter()
-            .map(|f| (f.name.clone(), f.value.clone()))
-            .collect()
-    }
-
-    /// Get the alias field value.
-    pub fn alias(&self) -> &str {
-        self.fields
-            .iter()
-            .find(|f| f.name == "alias")
-            .map(|f| f.value.as_str())
-            .unwrap_or("")
-    }
-}
-
-/// A single field in the connection creation form.
-#[derive(Debug, Clone, PartialEq)]
-pub struct ConnectionFormField {
-    pub name: String,
-    pub label: String,
-    pub value: String,
-    pub placeholder: String,
-    pub required: bool,
 }
 
 /// Application state, passed to the renderer.
@@ -300,6 +211,8 @@ pub struct AppState {
     pub column_add: Option<crate::app::column_manager::widget::ColumnManagerWidget>,
     /// Manuals overlay state, if open.
     pub manuals: Option<crate::app::manuals_manager::widget::ManualsWidget>,
+    /// Connection manager overlay state, if open.
+    pub conn_manager: Option<crate::app::connection_manager::widget::ConnManagerWidget>,
     /// Virtual FK definitions managed by the user.
     pub virtual_fks: Vec<VirtualFkDef>,
     /// Internal log history (warnings, errors, info messages).
@@ -350,6 +263,7 @@ impl AppState {
             column_manager: crate::app::column_manager::module::ColumnManagerModule::new(vec![], std::collections::HashMap::new()),
             column_add: None,
             manuals: None,
+            conn_manager: None,
             virtual_fks: Vec::new(),
             logs: Vec::new(),
             overlay_scroll: 0,

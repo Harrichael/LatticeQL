@@ -139,6 +139,8 @@ pub fn from_key_event(key: KeyEvent, focus: &FocusLoci) -> Option<UserKeyEvent> 
         EntityFocus::Overlay => match key.code {
             KeyCode::Char('j') => Some(UserKeyEvent::NavigateDown),
             KeyCode::Char('k') => Some(UserKeyEvent::NavigateUp),
+            KeyCode::Right => Some(UserKeyEvent::NextField),
+            KeyCode::Left => Some(UserKeyEvent::PrevField),
             KeyCode::Char('/') => Some(UserKeyEvent::StartSearch),
             KeyCode::Char('x' | 'd') => Some(UserKeyEvent::Remove),
             KeyCode::Char('a') => Some(UserKeyEvent::AddItem),
@@ -153,6 +155,8 @@ pub fn from_key_event(key: KeyEvent, focus: &FocusLoci) -> Option<UserKeyEvent> 
         EntityFocus::Editable => match key.code {
             KeyCode::Char('j') => Some(UserKeyEvent::NavigateDown),
             KeyCode::Char('k') => Some(UserKeyEvent::NavigateUp),
+            KeyCode::Right => Some(UserKeyEvent::NextField),
+            KeyCode::Left => Some(UserKeyEvent::PrevField),
             KeyCode::Char('/') => Some(UserKeyEvent::StartSearch),
             KeyCode::Char('x') => Some(UserKeyEvent::Remove),
             KeyCode::Char('d') => Some(UserKeyEvent::MoveItemDown),
@@ -459,10 +463,10 @@ Tab       | NxtFld    | NxtFld    | NxtFld    | NxtFld    | NxtFld    | NxtFld  
 BackTab   | PrvFld    | PrvFld    | PrvFld    | PrvFld    | PrvFld    | PrvFld    | PrvFld
 Up        | NavUp     | NavUp     | NavUp     | NavUp     | NavUp     | NavUp     | NavUp
 Down      | NavDown   | NavDown   | NavDown   | NavDown   | NavDown   | NavDown   | NavDown
-Left      | Text(←)   | Text(←)   | Text(←)   | -         | -         | -         | Back
-Right     | Text(→)   | Text(→)   | Text(→)   | -         | -         | -         | Back
-Ctrl+Left | Text(←)   | Text(←)   | Text(←)   | -         | -         | -         | Back
-Ctrl+Right| Text(→)   | Text(→)   | Text(→)   | -         | -         | -         | Back
+Left      | Text(←)   | Text(←)   | Text(←)   | PrvFld    | PrvFld    | -         | Back
+Right     | Text(→)   | Text(→)   | Text(→)   | NxtFld    | NxtFld    | -         | Back
+Ctrl+Left | Text(←)   | Text(←)   | Text(←)   | PrvFld    | PrvFld    | -         | Back
+Ctrl+Right| Text(→)   | Text(→)   | Text(→)   | NxtFld    | NxtFld    | -         | Back
 Backspace | Text(BS)  | Text(BS)  | Text(BS)  | -         | -         | -         | Back
 Delete    | Text(Del) | Text(Del) | Text(Del) | -         | -         | -         | Back
 Space     | Text( )   | Text( )   | TogItem   | TogItem   | TogItem   | -         | Back
