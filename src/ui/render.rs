@@ -142,14 +142,7 @@ fn render_data_viewer(
             } else {
                 "  "
             };
-            let mut default_cols: Vec<String> = node.row.keys().cloned().collect();
-            default_cols.sort();
-            let vis = state.column_manager.visible_columns(&node.table);
-            let summary_cols: Vec<String> = if vis.is_empty() {
-                default_cols.clone()
-            } else {
-                vis.to_vec()
-            };
+            let summary_cols = state.column_manager.visible_columns(&node.table).to_vec();
             let summary = summary_cols
                 .iter()
                 .map(|c| {

@@ -305,7 +305,6 @@ async fn handle_key(
         // ── Normal mode ──────────────────────────────────────────────────
         Mode::Normal => {
             match key.code {
-                KeyCode::Char('q') | KeyCode::Char('Q') => return Ok(false),
                 KeyCode::Char(':') => {
                     state.mode = Mode::CommandPalette;
                     state.clear_input();
@@ -344,6 +343,11 @@ async fn handle_key(
         // ── Query mode ───────────────────────────────────────────────────
         Mode::Query => {
             match key.code {
+                // ':' on empty input opens the command palette (same as Normal mode).
+                KeyCode::Char(':') if state.input.is_empty() => {
+                    state.mode = Mode::CommandPalette;
+                    state.clear_input();
+                }
                 KeyCode::Esc => {
                     state.mode = Mode::Normal;
                     state.clear_input();

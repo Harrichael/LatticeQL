@@ -110,14 +110,19 @@ pub fn from_key_event(key: KeyEvent, focus: &UserFocusLoci) -> Option<UserKeyEve
 
     // 3. InputFocus short-circuit
     match focus.input {
-        InputFocus::Text | InputFocus::Search => {
+        InputFocus::Text => {
             return Some(UserKeyEvent::TextInput(key));
+        }
+        InputFocus::Search => {
+            return match key.code {
+                KeyCode::Char(' ') => Some(UserKeyEvent::ToggleItem),
+                _ => Some(UserKeyEvent::TextInput(key)),
+            };
         }
         InputFocus::Idle => {
             return match key.code {
                 KeyCode::Char('j') => Some(UserKeyEvent::NavigateDown),
                 KeyCode::Char('k') => Some(UserKeyEvent::NavigateUp),
-                KeyCode::Char('q' | 'Q') => Some(UserKeyEvent::Quit),
                 KeyCode::Char(_) => Some(UserKeyEvent::TextInput(key)),
                 _ => None,
             };
@@ -454,7 +459,7 @@ Left      | -         | Text(←)   | Text(←)   | -         | -         | -   
 Right     | -         | Text(→)   | Text(→)   | -         | -         | -         | Back
 Backspace | -         | Text(BS)  | Text(BS)  | -         | -         | -         | Back
 Delete    | -         | Text(Del) | Text(Del) | -         | -         | -         | Back
-Space     | Text( )   | Text( )   | Text( )   | TogItem   | TogItem   | -         | Back
+Space     | Text( )   | Text( )   | TogItem   | TogItem   | TogItem   | -         | Back
 :         | Text(:)   | Text(:)   | Text(:)   | -         | -         | -         | Back
 /         | Text(/)   | Text(/)   | Text(/)   | StartSrch | StartSrch | -         | Back
 a         | Text(a)   | Text(a)   | Text(a)   | AddItem   | AddItem   | -         | Back
@@ -468,7 +473,7 @@ l-m       | Text(l-m) | Text(l-m) | Text(l-m) | -         | -         | -       
 n         | Text(n)   | Text(n)   | Text(n)   | LoadMore  | -         | No        | Back
 o         | Text(o)   | Text(o)   | Text(o)   | InsAft    | InsAft    | -         | Back
 p         | Text(p)   | Text(p)   | Text(p)   | -         | -         | -         | Back
-q         | Quit      | Text(q)   | Text(q)   | Quit      | Quit      | -         | Back
+q         | Text(q)   | Text(q)   | Text(q)   | Quit      | Quit      | -         | Back
 r-t       | Text(r-t) | Text(r-t) | Text(r-t) | -         | -         | -         | Back
 u         | Text(u)   | Text(u)   | Text(u)   | -         | MoveUp    | -         | Back
 v-w       | Text(v-w) | Text(v-w) | Text(v-w) | -         | -         | -         | Back
@@ -478,7 +483,7 @@ z         | Text(z)   | Text(z)   | Text(z)   | Undo      | Undo      | -       
 A-M       | Text(A-M) | Text(A-M) | Text(A-M) | -         | -         | -         | Back
 N         | Text(N)   | Text(N)   | Text(N)   | -         | -         | No        | Back
 O-P       | Text(O-P) | Text(O-P) | Text(O-P) | -         | -         | -         | Back
-Q         | Quit      | Text(Q)   | Text(Q)   | Quit      | Quit      | -         | Back
+Q         | Text(Q)   | Text(Q)   | Text(Q)   | Quit      | Quit      | -         | Back
 R-X       | Text(R-X) | Text(R-X) | Text(R-X) | -         | -         | -         | Back
 Y         | Text(Y)   | Text(Y)   | Text(Y)   | -         | -         | Yes       | Back
 Z         | Text(Z)   | Text(Z)   | Text(Z)   | -         | -         | -         | Back
