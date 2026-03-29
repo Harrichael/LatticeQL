@@ -1,6 +1,6 @@
 # UI Model — Domain-Specific Toolkit
 
-This module (`ui/model/`) is a domain-specific toolkit for building terminal UIs
+This module (`app/tui/`) is a domain-specific toolkit for building terminal UIs
 with clean input handling. It implements the **Command pattern** (Gang of Four):
 raw platform key events are translated into semantic command objects
 (`UserKeyEvent`), which are dispatched to handler methods on the focused widget
@@ -9,7 +9,7 @@ what widgets do with commands.
 
 ## Rules
 
-- **Nothing in `ui/model/` references specific widgets, views, or app features.**
+- **Nothing in `app/tui/` references specific widgets, views, or app features.**
   This module defines the generic toolkit (events, focus model, dispatch trait).
   Widget implementations live outside this module.
 - **`UserKeyEvent` variants are semantically generic.** Use names like `Remove`,

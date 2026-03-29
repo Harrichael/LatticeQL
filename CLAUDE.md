@@ -18,59 +18,114 @@ The central insight is that relational data already has structure — foreign ke
 
 ```
 src/
-  main.rs          — entry point, event loop, all keyboard handling
+  main.rs                — thin entry point: CLI args, terminal setup, draw/tick/suspend loop
   engine/
-    mod.rs         — re-exports from core and paths
-    core.rs        — Engine, DataNode tree, rule execution, DB queries
-    paths.rs       — PathStep/TablePath types, IDDFS path-finding, edge discovery
-  rules.rs         — rule parser/grammar, tokenizer, completion hints
-  schema.rs        — schema discovery, virtual FK definitions
-  config.rs        — config file loading and merging
-  log.rs           — thread-safe log queue
+    core.rs              — Engine, DataNode tree, rule execution, DB queries
+    paths.rs             — PathStep/TablePath types, IDDFS path-finding, edge discovery
+  rules.rs               — rule parser/grammar, tokenizer, completion hints
+  schema.rs              — schema discovery, virtual FK definitions
+  config.rs              — config file loading and merging
+  log.rs                 — thread-safe log queue
+  connection_manager.rs  — multi-connection manager, merged schema
   db/
-    mod.rs         — Database trait, Value/Row/TableInfo types
-    sqlite.rs      — SQLite backend
-    mysql.rs       — MySQL backend (uses information_schema)
-  ui/
-    app.rs         — AppState struct, Mode enum, helper methods
-    render.rs      — all Ratatui rendering functions
-manuals/           — in-app help manuals (read with 'm' key)
-samples/           — example SQL files and pre-built SQLite databases
+    mod.rs               — Database trait, Value/Row/TableInfo types
+    sqlite.rs            — SQLite backend
+    mysql.rs             — MySQL backend (uses information_schema)
+  app/
+    tui/                 — generic TUI toolkit (Command pattern for input handling)
+      keys.rs            — FocusLoci, UserKeyEvent, from_key_event(), snapshot test
+      control_panel.rs   — ControlPanel trait, dispatch()
+      render.rs          — centered_rect(), render_search_bar() utilities
+    data_playground/     — core app logic (owns engine, state, connections)
+      mod.rs             — module declarations + re-exports
+      types.rs           — DataPlayground, TickResult, Mode, ConfirmAction, PALETTE_COMMANDS
+      state.rs           — AppState struct + methods
+      module.rs          — new(), tick(), render(), handle_key(), helpers
+      render.rs          — all Ratatui render functions
+      key_handler.rs     — mode-based key dispatch (Normal, Query, CommandSearch, etc.)
+      widget_dispatch.rs — overlay widget dispatch chain
+      widgets/           — ErrorInfoWidget, ConfirmWidget
+    column_manager/      — column visibility overlay
+    connection_manager/  — connection manager overlay (tabs, add form, alias prompt)
+    log_viewer/          — log viewer overlay
+    manuals_manager/     — manuals browser overlay (list + viewer)
+    query_rules_manager/ — rule reorder overlay (with undo/redo)
+    virtual_fk_manager/  — virtual FK manager overlay (list + wizard form)
+    model.rs             — SchemaNode, ColumnDef (DB-agnostic schema types)
+manuals/                 — in-app help manuals (embedded at compile time)
+samples/                 — example SQL files and pre-built SQLite databases
+testing/                 — testing guides (KEYS_EXPERIENCE.md)
 ```
+
+## Architecture
+
+### Command Pattern for Input Handling
+
+All keyboard input flows through a three-layer Command pattern:
+
+1. **`from_key_event(key, focus)`** (`tui/keys.rs`) — translates raw crossterm `KeyEvent` into semantic `UserKeyEvent` based on `FocusLoci` (2D focus state: `InputFocus` × `EntityFocus`)
+2. **`dispatch(ctrl_panel, event)`** (`tui/control_panel.rs`) — exhaustive match routes `UserKeyEvent` to `on_*()` trait methods
+3. **`ControlPanel` impl** — each widget handles only the events it cares about (default no-ops for the rest)
+
+### Widget/Overlay Pattern
+
+Each overlay module follows the same structure:
+
+```
+app/<module_name>/
+  mod.rs            — module declarations
+  widget.rs         — widget struct (data), FocusLoci field
+  control_panel.rs  — impl ControlPanel (input handling) + tests
+  render.rs         — render function (display)
+```
+
+**Key principles:**
+- Widget owns its state (cursor, search, focus)
+- `focus_loci()` returns `FocusLoci` stored on the widget — single source of truth
+- Control panel handles all input; widget is pure data
+- Render reads widget state; only writes `viewport_height` for scroll clamping
+- Side effects use action enums (e.g., `ConnManagerAction`, `VfkAction`) — the widget produces an action, the app layer performs async/IO work
+
+### DataPlayground
+
+`DataPlayground` is the top-level application struct owning `AppState`, `Engine`, and `ConnectionManager`. It provides:
+- `new()` — async initialization (config, connections, schema)
+- `tick()` — drain logs, poll events, handle keys → returns `TickResult`
+- `render()` — delegates to the render module
+
+`main.rs` is a thin shell (~70 lines): parse args, create playground, terminal setup, `loop { draw, tick, suspend }`, teardown.
 
 ## Key Concepts
 
-**Rules** are the user's instructions to the engine. There are three kinds:
+**Rules** are the user's instructions to the engine. Three kinds:
 - `Filter` — load rows matching a WHERE clause as root nodes
 - `Relation` — follow FK links and attach related rows as children
 - `Prune` — remove matching nodes from the tree in-memory
 
-The engine holds an ordered list of rules. Re-executing them in order from scratch always produces a deterministic tree.
+**DataNode** is a tree node: table, row data (`HashMap<String, Value>`), children. Flattened to `Vec<(depth, &DataNode)>` for rendering.
 
-**DataNode** is a tree node: it knows its table, its row data (as a `HashMap<String, Value>`), and its children. The tree is flattened to a `Vec<(depth, &DataNode)>` for rendering.
+**Schema** is discovered at startup: table names, columns, FK constraints, virtual FKs. Path-finding (IDDFS, max depth 10) produces `TablePath` objects for JOIN-equivalent queries.
 
-**Schema** is discovered once at startup: table names, column info, real FK constraints, and user-defined virtual FKs. Path-finding (iterative deepening DFS, max depth 10) over this graph produces `TablePath` objects that the engine uses to write JOIN-equivalent queries. The search is resumable — the UI can request more paths beyond the initial 10.
+**Mode** drives core TUI branching: `Normal`, `Query`, `CommandPalette`, `CommandSearch`, `PathSelection`. Overlays are `Option<Widget>` fields on `AppState`, not Mode variants.
 
-**AppState** owns all UI state: current mode, cursor positions, visible columns per table, column ordering, rules list, overlay data. It is passed (mutably) to both the keyboard handler and the renderer.
+## Adding a New Overlay
 
-**Mode** (an enum in `app.rs`) drives all TUI branching. Each mode has its own keyboard handler branch in `main.rs` and its own render path in `render.rs`. Adding a new overlay means adding a `Mode` variant, a handler branch, and a render function.
+1. Create `src/app/<name>/` with `mod.rs`, `widget.rs`, `control_panel.rs`, `render.rs`
+2. Widget struct holds state + `focus: FocusLoci` + `closed: bool`
+3. Implement `ControlPanel` trait — `focus_loci()` returns `self.focus`, handle relevant `on_*()` events
+4. Add `Option<Widget>` field to `AppState`
+5. Add dispatch block in `widget_dispatch.rs`
+6. Add render call in `data_playground/render.rs`
+7. Add command palette entry in `PALETTE_COMMANDS`
 
-## Keyboard Shortcut Map (Normal Mode)
+## Testing
 
-| Key | Action |
-|-----|--------|
-| `:` | Enter command mode |
-| `j` / `↓` | Select next row |
-| `k` / `↑` | Select previous row |
-| `f` / `Enter` | Toggle fold |
-| `s` | Toggle schema sidebar |
-| `c` | Open column manager |
-| `r` | Open rule reorder overlay |
-| `v` | Open virtual FK manager |
-| `m` | Open manual browser |
-| `l` | Open log viewer |
-| `x` | Prune selected node |
-| `q` | Quit |
+Run `cargo test`. 138 tests across modules:
+- Engine integration tests (SQLite-backed) in `engine/core.rs`
+- Rule parser tests in `rules.rs`
+- Schema tests in `schema.rs`
+- Key mapping snapshot test in `tui/keys.rs`
+- ControlPanel tests in each widget's `control_panel.rs`
 
 ## Config File
 
@@ -92,17 +147,6 @@ Searched upward from `cwd` then from `~/.latticeql/config.jsonnet`. Format is Js
 }
 ```
 
-## Adding a New Overlay
-
-1. Add a variant to `Mode` in `src/ui/app.rs`.
-2. Add a handler `match` arm in `handle_key` in `src/main.rs`.
-3. Add a `render_*` function in `src/ui/render.rs` and call it from the overlay dispatch in `render()`.
-4. Update the Normal-mode command-bar hint string in `render_command_bar`.
-
-## Testing
-
-Run `cargo test`. Tests live next to source files (SQLite-backed integration tests in `engine.rs`, parser unit tests in `rules.rs`, schema tests in `schema.rs`).
-
 ## Manuals
 
-In-app documentation lives in `manuals/`. Press `m` in Normal mode to browse and read them. They are embedded at compile time via `include_str!`.
+In-app documentation lives in `manuals/`. Access via command palette `:m`. Embedded at compile time via `include_str!`.
