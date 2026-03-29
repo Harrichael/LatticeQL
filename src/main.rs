@@ -308,6 +308,22 @@ async fn handle_key(
         return Ok(true);
     }
 
+    // Rule reorder overlay has exclusive key handling while open.
+    if let Some(ref mut widget) = state.rules_reorder {
+        if let Some(event) = from_key_event(key, &widget.focus_loci()) {
+            dispatch(widget, event);
+        }
+        if widget.closed {
+            if widget.confirmed {
+                engine.rules = widget.rules.clone();
+                state.next_rule_cursor = widget.next_cursor.min(engine.rules.len());
+                let _ = engine.reexecute_all(db).await;
+            }
+            state.rules_reorder = None;
+        }
+        return Ok(true);
+    }
+
     match state.mode.clone() {
         // ── Normal mode ──────────────────────────────────────────────────
         Mode::Normal => {
@@ -562,15 +578,12 @@ async fn handle_key(
                         }
                         Some("rules") => {
                             if !engine.rules.is_empty() {
-                                state.rules = engine.rules.clone();
-                                state.rule_cursor = 0;
-                                state.next_rule_cursor =
-                                    state.next_rule_cursor.min(state.rules.len());
-                                state.rule_reorder_undo.clear();
-                                state.rule_reorder_redo.clear();
-                                state.mode = Mode::RuleReorder;
-                            } else {
-                                state.mode = Mode::Normal;
+                                state.rules_reorder = Some(
+                                    app::query_rules_manager::widget::RulesWidget::new(
+                                        engine.rules.clone(),
+                                        state.next_rule_cursor,
+                                    )
+                                );
                             }
                         }
                         Some("connections") => {
@@ -585,7 +598,7 @@ async fn handle_key(
                             state.mode = Mode::LogViewer { cursor: state.logs.len().saturating_sub(1) };
                         }
                         Some("manuals") => {
-                            state.manuals = Some(app::manuals::widget::ManualsWidget::new());
+                            state.manuals = Some(app::manuals_manager::widget::ManualsWidget::new());
                         }
                         Some("prune") => {
                             let flat = flatten_tree(&engine.roots);
@@ -695,111 +708,6 @@ async fn handle_key(
                     }
                     state.mode = Mode::Normal;
                     state.paths.clear();
-                }
-                _ => {}
-            }
-        }
-
-        // ── Rule reorder overlay ─────────────────────────────────────────
-        Mode::RuleReorder => {
-            let push_rule_reorder_undo = |state: &mut AppState| {
-                state
-                    .rule_reorder_undo
-                    .push((
-                        state.rules.clone(),
-                        state.rule_cursor,
-                        state.next_rule_cursor,
-                    ));
-                state.rule_reorder_redo.clear();
-            };
-            match key.code {
-                KeyCode::Esc => {
-                    state.rule_reorder_undo.clear();
-                    state.rule_reorder_redo.clear();
-                    state.mode = Mode::Normal;
-                }
-                KeyCode::Enter => {
-                    // Apply reordered rules
-                    engine.rules = state.rules.clone();
-                    state.next_rule_cursor =
-                        state.next_rule_cursor.min(engine.rules.len());
-                    let _ = engine.reexecute_all(db).await;
-                    state.rule_reorder_undo.clear();
-                    state.rule_reorder_redo.clear();
-                    state.mode = Mode::Normal;
-                }
-                KeyCode::Up | KeyCode::Char('k') => {
-                    if state.rule_cursor > 0 {
-                        state.rule_cursor -= 1;
-                    }
-                }
-                KeyCode::Down | KeyCode::Char('j') => {
-                    if state.rule_cursor + 1 < state.rules.len() {
-                        state.rule_cursor += 1;
-                    }
-                }
-                KeyCode::Char('u') => {
-                    // Swap up
-                    if state.rule_cursor > 0 {
-                        push_rule_reorder_undo(state);
-                        state.rules.swap(state.rule_cursor, state.rule_cursor - 1);
-                        state.rule_cursor -= 1;
-                    }
-                }
-                KeyCode::Char('d') => {
-                    // Swap down
-                    if state.rule_cursor + 1 < state.rules.len() {
-                        push_rule_reorder_undo(state);
-                        state.rules.swap(state.rule_cursor, state.rule_cursor + 1);
-                        state.rule_cursor += 1;
-                    }
-                }
-                KeyCode::Char('x') => {
-                    if !state.rules.is_empty() {
-                        push_rule_reorder_undo(state);
-                        state.rules.remove(state.rule_cursor);
-                        if state.rules.is_empty() {
-                            state.rule_cursor = 0;
-                            state.next_rule_cursor = 0;
-                        } else if state.rule_cursor >= state.rules.len() {
-                            state.rule_cursor = state.rules.len() - 1;
-                        }
-                        state.next_rule_cursor = state.next_rule_cursor.min(state.rules.len());
-                    }
-                }
-                KeyCode::Char('i') => {
-                    state.next_rule_cursor = state.rule_cursor.min(state.rules.len());
-                }
-                KeyCode::Char('o') => {
-                    state.next_rule_cursor = (state.rule_cursor + 1).min(state.rules.len());
-                }
-                KeyCode::Char('z') => {
-                    if let Some((rules, cursor, next_cursor)) = state.rule_reorder_undo.pop() {
-                        state
-                            .rule_reorder_redo
-                            .push((
-                                state.rules.clone(),
-                                state.rule_cursor,
-                                state.next_rule_cursor,
-                            ));
-                        state.rules = rules;
-                        state.rule_cursor = cursor.min(state.rules.len().saturating_sub(1));
-                        state.next_rule_cursor = next_cursor.min(state.rules.len());
-                    }
-                }
-                KeyCode::Char('y') => {
-                    if let Some((rules, cursor, next_cursor)) = state.rule_reorder_redo.pop() {
-                        state
-                            .rule_reorder_undo
-                            .push((
-                                state.rules.clone(),
-                                state.rule_cursor,
-                                state.next_rule_cursor,
-                            ));
-                        state.rules = rules;
-                        state.rule_cursor = cursor.min(state.rules.len().saturating_sub(1));
-                        state.next_rule_cursor = next_cursor.min(state.rules.len());
-                    }
                 }
                 _ => {}
             }

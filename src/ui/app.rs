@@ -1,6 +1,5 @@
 use crate::command_history::CommandHistory;
 use crate::connection_manager::ConnectionType;
-use crate::rules::Rule;
 use crate::engine::TablePath;
 use crate::schema::VirtualFkDef;
 use std::collections::HashMap;
@@ -142,8 +141,6 @@ pub enum Mode {
     CommandPalette,
     /// User is being asked to pick among multiple paths.
     PathSelection,
-    /// User is reordering rules.
-    RuleReorder,
     /// Error message displayed.
     Error(String),
     /// Informational message displayed.
@@ -289,16 +286,10 @@ pub struct AppState {
     pub path_cursor: usize,
     /// Table names from the schema, for display.
     pub table_names: Vec<String>,
-    /// Rules list.
-    pub rules: Vec<Rule>,
-    /// Selected rule index (for reorder mode).
-    pub rule_cursor: usize,
     /// Next insertion position for newly added rules.
     pub next_rule_cursor: usize,
-    /// Undo stack for rule reorder mode snapshots: (rules, cursor, next cursor).
-    pub rule_reorder_undo: Vec<(Vec<Rule>, usize, usize)>,
-    /// Redo stack for rule reorder mode snapshots: (rules, cursor, next cursor).
-    pub rule_reorder_redo: Vec<(Vec<Rule>, usize, usize)>,
+    /// Rule reorder overlay state, if open.
+    pub rules_reorder: Option<crate::app::query_rules_manager::widget::RulesWidget>,
     /// Whether to show the schema sidebar.
     pub show_schema: bool,
     /// Column names per table, for command completion hints.
@@ -308,7 +299,7 @@ pub struct AppState {
     /// Column manager overlay state, if open.
     pub column_add: Option<crate::app::column_manager::widget::ColumnManagerWidget>,
     /// Manuals overlay state, if open.
-    pub manuals: Option<crate::app::manuals::widget::ManualsWidget>,
+    pub manuals: Option<crate::app::manuals_manager::widget::ManualsWidget>,
     /// Virtual FK definitions managed by the user.
     pub virtual_fks: Vec<VirtualFkDef>,
     /// Internal log history (warnings, errors, info messages).
@@ -352,11 +343,8 @@ impl AppState {
             paths_next_depth: 1,
             path_cursor: 0,
             table_names: Vec::new(),
-            rules: Vec::new(),
-            rule_cursor: 0,
             next_rule_cursor: 0,
-            rule_reorder_undo: Vec::new(),
-            rule_reorder_redo: Vec::new(),
+            rules_reorder: None,
             show_schema: false,
             table_columns: HashMap::new(),
             column_manager: crate::app::column_manager::module::ColumnManagerModule::new(vec![], std::collections::HashMap::new()),

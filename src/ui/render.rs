@@ -50,7 +50,6 @@ pub fn render(f: &mut Frame, state: &mut AppState, roots: &[DataNode]) {
     // Render overlays
     match &state.mode {
         Mode::PathSelection => render_path_selection(f, state),
-        Mode::RuleReorder => render_rule_reorder(f, state),
         Mode::VirtualFkManager { .. } => render_virtual_fk_manager(f, state),
         Mode::VirtualFkAdd(_) => render_virtual_fk_add(f, state),
         Mode::LogViewer { .. } => render_log_viewer(f, state),
@@ -82,7 +81,12 @@ pub fn render(f: &mut Frame, state: &mut AppState, roots: &[DataNode]) {
 
     // Render manuals overlay
     if let Some(ref mut widget) = state.manuals {
-        crate::app::manuals::render::render(f, widget);
+        crate::app::manuals_manager::render::render(f, widget);
+    }
+
+    // Render rule reorder overlay
+    if let Some(ref widget) = state.rules_reorder {
+        crate::app::query_rules_manager::render::render(f, widget);
     }
 }
 
@@ -436,49 +440,6 @@ fn render_path_selection(f: &mut Frame, state: &AppState) {
     }
 
     let list = List::new(items).block(block);
-    f.render_widget(list, area);
-}
-
-fn render_rule_reorder(f: &mut Frame, state: &AppState) {
-    let area = centered_rect(60, 50, f.area());
-    f.render_widget(Clear, area);
-
-    let mut items: Vec<ListItem> = Vec::new();
-    const SLOT_LABEL: &str = "next insertion";
-
-    if state.rules.is_empty() {
-        items.push(ListItem::new(format!("→ {}", SLOT_LABEL)).style(Style::default().fg(Color::DarkGray)));
-    } else {
-        for (i, r) in state.rules.iter().enumerate() {
-            if i == state.next_rule_cursor {
-                items.push(
-                    ListItem::new(format!("→ {}", SLOT_LABEL))
-                        .style(Style::default().fg(Color::DarkGray)),
-                );
-            }
-
-            let text = format!("   {}. {}", i + 1, r);
-            let item = ListItem::new(text);
-            if i == state.rule_cursor {
-                items.push(item.style(Style::default().bg(Color::Blue).fg(Color::White)));
-            } else {
-                items.push(item);
-            }
-        }
-        if state.next_rule_cursor == state.rules.len() {
-            items.push(
-                ListItem::new(format!("→ {}", SLOT_LABEL))
-                    .style(Style::default().fg(Color::DarkGray)),
-            );
-        }
-    }
-
-    let list = List::new(items).block(
-        Block::default()
-            .title(" Rules (↑↓ move cursor, u/d swap, x delete, i/o set insertion, z undo, y redo, Enter apply, Esc cancel) ")
-            .borders(Borders::ALL)
-            .style(Style::default().fg(Color::Yellow)),
-    );
     f.render_widget(list, area);
 }
 
