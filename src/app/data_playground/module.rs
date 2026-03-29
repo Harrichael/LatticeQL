@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 
 use anyhow::Result;
+use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
 use crate::app::column_manager::module::ColumnManagerModule;
 use crate::app::model::SchemaNode;
@@ -9,13 +10,50 @@ use crate::config;
 use crate::connection_manager::{ConnectionManager, ConnectionType};
 use crate::db;
 use crate::engine::Engine;
+use crate::log;
 use crate::rules;
 use crate::engine;
 use crate::ui::app::AppState;
 
-use super::DataPlayground;
+use super::{DataPlayground, TickResult};
 
 impl DataPlayground {
+    /// Drain logs, poll for events, handle key input.
+    /// Returns `Suspend` when Ctrl+Z was pressed, `Quit` to exit.
+    pub async fn tick(&mut self) -> Result<TickResult> {
+        self.state.logs.extend(log::drain());
+
+        if event::poll(std::time::Duration::from_millis(50))? {
+            match event::read()? {
+                Event::Key(key) if key.kind == KeyEventKind::Press || key.kind == KeyEventKind::Repeat => {
+                    return self.handle_key(key).await;
+                }
+                _ => {}
+            }
+        }
+        Ok(TickResult::Continue)
+    }
+
+    /// Render the current state to the given frame.
+    pub fn render(&mut self, f: &mut ratatui::Frame) {
+        crate::ui::render::render(f, &mut self.state, &self.engine.roots);
+    }
+
+    async fn handle_key(&mut self, key: KeyEvent) -> Result<TickResult> {
+        // Ctrl+Z suspends regardless of current mode.
+        if key.code == KeyCode::Char('z') && key.modifiers.contains(KeyModifiers::CONTROL) {
+            return Ok(TickResult::Suspend);
+        }
+
+        // Try widget dispatch first (overlays have priority).
+        if let Some(result) = super::widget_dispatch::dispatch_widgets(self, key).await? {
+            return Ok(result);
+        }
+
+        // Fall through to mode-based key handling.
+        super::key_handler::handle_mode_key(self, key).await
+    }
+
     pub async fn new(database_url: Option<String>) -> Result<Self> {
         let mut conn_mgr = ConnectionManager::new();
         let defaults = config::load_config()?;

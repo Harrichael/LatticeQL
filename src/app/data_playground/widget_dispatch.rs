@@ -12,10 +12,10 @@ use super::module::{query_type_options, refresh_schema_from_conn_mgr, saved_ids}
 use super::{DataPlayground, TickResult};
 use super::widgets::error_info::ErrorInfoWidget;
 
-/// Dispatch a key event to the active overlay, if any.
-/// Returns `Some(TickResult)` if an overlay consumed the event,
-/// `None` if no overlay is active and the caller should handle the key.
-pub(super) async fn dispatch_overlay(
+/// Dispatch a key event to the active widget overlay, if any.
+/// Returns `Some(TickResult)` if a widget consumed the event,
+/// `None` if no widget is active and the caller should handle the key.
+pub(super) async fn dispatch_widgets(
     playground: &mut DataPlayground,
     key: KeyEvent,
 ) -> Result<Option<TickResult>> {
