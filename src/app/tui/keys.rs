@@ -5,9 +5,6 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 pub enum InputFocus {
     /// No text buffer — chars are action keys per EntityFocus.
     None,
-    /// Minimal nav (j/k/q) bound, everything else → TextInput.
-    /// Used by Normal mode — ready to accept query input.
-    Idle,
     /// All remaining keys → TextInput. (Query, CommandPalette, forms)
     Text,
     /// All remaining keys → TextInput. (overlay search active)
@@ -117,18 +114,6 @@ pub fn from_key_event(key: KeyEvent, focus: &FocusLoci) -> Option<UserKeyEvent> 
             return match key.code {
                 KeyCode::Char(' ') => Some(UserKeyEvent::ToggleItem),
                 _ => Some(UserKeyEvent::TextInput(key)),
-            };
-        }
-        InputFocus::Idle => {
-            return match key.code {
-                KeyCode::Char('j') => Some(UserKeyEvent::NavigateDown),
-                KeyCode::Char('k') => Some(UserKeyEvent::NavigateUp),
-                KeyCode::Char(_)
-                | KeyCode::Left
-                | KeyCode::Right
-                | KeyCode::Backspace
-                | KeyCode::Delete => Some(UserKeyEvent::TextInput(key)),
-                _ => None,
             };
         }
         InputFocus::None => {} // fall through to EntityFocus
@@ -298,7 +283,6 @@ mod tests {
 
     fn input_name(i: InputFocus) -> &'static str {
         match i {
-            InputFocus::Idle => "Idle",
             InputFocus::Text => "Text",
             InputFocus::Search => "Search",
             InputFocus::None => "None",
@@ -315,7 +299,7 @@ mod tests {
     }
 
     fn build_mapping_table() -> String {
-        let all_inputs = [InputFocus::Idle, InputFocus::Text, InputFocus::Search, InputFocus::None];
+        let all_inputs = [InputFocus::Text, InputFocus::Search, InputFocus::None];
         let all_entities = [EntityFocus::Overlay, EntityFocus::Editable, EntityFocus::Confirm, EntityFocus::Dismiss];
 
         // All key events used to determine column grouping
@@ -450,49 +434,49 @@ mod tests {
     fn key_mapping_snapshot() {
         let table = build_mapping_table();
         let expected = "\
-Key       | Idle      | Text      | Search    | None      | None      | None      | None
-          | *         | *         | *         | Overlay   | Editable  | Confirm   | Dismiss
-----------|-----------|-----------|-----------|-----------|-----------|-----------|-----------
-Ctrl+Z    | Suspend   | Suspend   | Suspend   | Suspend   | Suspend   | Suspend   | Suspend
-Ctrl+C    | FrcQuit   | FrcQuit   | FrcQuit   | FrcQuit   | FrcQuit   | FrcQuit   | FrcQuit
-Ctrl+S    | Save      | Save      | Save      | Save      | Save      | Save      | Save
-Ctrl+R    | RevSrch   | RevSrch   | RevSrch   | RevSrch   | RevSrch   | RevSrch   | RevSrch
-Esc       | Back      | Back      | Back      | Back      | Back      | Back      | Back
-Enter     | Confirm   | Confirm   | Confirm   | Confirm   | Confirm   | Confirm   | Confirm
-Tab       | NxtFld    | NxtFld    | NxtFld    | NxtFld    | NxtFld    | NxtFld    | NxtFld
-BackTab   | PrvFld    | PrvFld    | PrvFld    | PrvFld    | PrvFld    | PrvFld    | PrvFld
-Up        | NavUp     | NavUp     | NavUp     | NavUp     | NavUp     | NavUp     | NavUp
-Down      | NavDown   | NavDown   | NavDown   | NavDown   | NavDown   | NavDown   | NavDown
-Left      | Text(←)   | Text(←)   | Text(←)   | PrvFld    | PrvFld    | -         | Back
-Right     | Text(→)   | Text(→)   | Text(→)   | NxtFld    | NxtFld    | -         | Back
-Ctrl+Left | Text(←)   | Text(←)   | Text(←)   | PrvFld    | PrvFld    | -         | Back
-Ctrl+Right| Text(→)   | Text(→)   | Text(→)   | NxtFld    | NxtFld    | -         | Back
-Backspace | Text(BS)  | Text(BS)  | Text(BS)  | -         | -         | -         | Back
-Delete    | Text(Del) | Text(Del) | Text(Del) | -         | -         | -         | Back
-Space     | Text( )   | Text( )   | TogItem   | TogItem   | TogItem   | -         | Back
-:         | Text(:)   | Text(:)   | Text(:)   | -         | -         | -         | Back
-/         | Text(/)   | Text(/)   | Text(/)   | StartSrch | StartSrch | -         | Back
-a         | Text(a)   | Text(a)   | Text(a)   | AddItem   | AddItem   | -         | Back
-b-c       | Text(b-c) | Text(b-c) | Text(b-c) | -         | -         | -         | Back
-d         | Text(d)   | Text(d)   | Text(d)   | Remove    | MoveDn    | -         | Back
-e-h       | Text(e-h) | Text(e-h) | Text(e-h) | -         | -         | -         | Back
-i         | Text(i)   | Text(i)   | Text(i)   | InsBfr    | InsBfr    | -         | Back
-j         | NavDown   | Text(j)   | Text(j)   | NavDown   | NavDown   | -         | Back
-k         | NavUp     | Text(k)   | Text(k)   | NavUp     | NavUp     | -         | Back
-l-m       | Text(l-m) | Text(l-m) | Text(l-m) | -         | -         | -         | Back
-n         | Text(n)   | Text(n)   | Text(n)   | LoadMore  | -         | No        | Back
-o         | Text(o)   | Text(o)   | Text(o)   | InsAft    | InsAft    | -         | Back
-p-t       | Text(p-t) | Text(p-t) | Text(p-t) | -         | -         | -         | Back
-u         | Text(u)   | Text(u)   | Text(u)   | -         | MoveUp    | -         | Back
-v-w       | Text(v-w) | Text(v-w) | Text(v-w) | -         | -         | -         | Back
-x         | Text(x)   | Text(x)   | Text(x)   | Remove    | Remove    | -         | Back
-y         | Text(y)   | Text(y)   | Text(y)   | Redo      | Redo      | Yes       | Back
-z         | Text(z)   | Text(z)   | Text(z)   | Undo      | Undo      | -         | Back
-A-M       | Text(A-M) | Text(A-M) | Text(A-M) | -         | -         | -         | Back
-N         | Text(N)   | Text(N)   | Text(N)   | -         | -         | No        | Back
-O-X       | Text(O-X) | Text(O-X) | Text(O-X) | -         | -         | -         | Back
-Y         | Text(Y)   | Text(Y)   | Text(Y)   | -         | -         | Yes       | Back
-Z         | Text(Z)   | Text(Z)   | Text(Z)   | -         | -         | -         | Back
+Key       | Text      | Search    | None      | None      | None      | None
+          | *         | *         | Overlay   | Editable  | Confirm   | Dismiss
+----------|-----------|-----------|-----------|-----------|-----------|-----------
+Ctrl+Z    | Suspend   | Suspend   | Suspend   | Suspend   | Suspend   | Suspend
+Ctrl+C    | FrcQuit   | FrcQuit   | FrcQuit   | FrcQuit   | FrcQuit   | FrcQuit
+Ctrl+S    | Save      | Save      | Save      | Save      | Save      | Save
+Ctrl+R    | RevSrch   | RevSrch   | RevSrch   | RevSrch   | RevSrch   | RevSrch
+Esc       | Back      | Back      | Back      | Back      | Back      | Back
+Enter     | Confirm   | Confirm   | Confirm   | Confirm   | Confirm   | Confirm
+Tab       | NxtFld    | NxtFld    | NxtFld    | NxtFld    | NxtFld    | NxtFld
+BackTab   | PrvFld    | PrvFld    | PrvFld    | PrvFld    | PrvFld    | PrvFld
+Up        | NavUp     | NavUp     | NavUp     | NavUp     | NavUp     | NavUp
+Down      | NavDown   | NavDown   | NavDown   | NavDown   | NavDown   | NavDown
+Left      | Text(←)   | Text(←)   | PrvFld    | PrvFld    | -         | Back
+Right     | Text(→)   | Text(→)   | NxtFld    | NxtFld    | -         | Back
+Ctrl+Left | Text(←)   | Text(←)   | PrvFld    | PrvFld    | -         | Back
+Ctrl+Right| Text(→)   | Text(→)   | NxtFld    | NxtFld    | -         | Back
+Backspace | Text(BS)  | Text(BS)  | -         | -         | -         | Back
+Delete    | Text(Del) | Text(Del) | -         | -         | -         | Back
+Space     | Text( )   | TogItem   | TogItem   | TogItem   | -         | Back
+:         | Text(:)   | Text(:)   | -         | -         | -         | Back
+/         | Text(/)   | Text(/)   | StartSrch | StartSrch | -         | Back
+a         | Text(a)   | Text(a)   | AddItem   | AddItem   | -         | Back
+b-c       | Text(b-c) | Text(b-c) | -         | -         | -         | Back
+d         | Text(d)   | Text(d)   | Remove    | MoveDn    | -         | Back
+e-h       | Text(e-h) | Text(e-h) | -         | -         | -         | Back
+i         | Text(i)   | Text(i)   | InsBfr    | InsBfr    | -         | Back
+j         | Text(j)   | Text(j)   | NavDown   | NavDown   | -         | Back
+k         | Text(k)   | Text(k)   | NavUp     | NavUp     | -         | Back
+l-m       | Text(l-m) | Text(l-m) | -         | -         | -         | Back
+n         | Text(n)   | Text(n)   | LoadMore  | -         | No        | Back
+o         | Text(o)   | Text(o)   | InsAft    | InsAft    | -         | Back
+p-t       | Text(p-t) | Text(p-t) | -         | -         | -         | Back
+u         | Text(u)   | Text(u)   | -         | MoveUp    | -         | Back
+v-w       | Text(v-w) | Text(v-w) | -         | -         | -         | Back
+x         | Text(x)   | Text(x)   | Remove    | Remove    | -         | Back
+y         | Text(y)   | Text(y)   | Redo      | Redo      | Yes       | Back
+z         | Text(z)   | Text(z)   | Undo      | Undo      | -         | Back
+A-M       | Text(A-M) | Text(A-M) | -         | -         | -         | Back
+N         | Text(N)   | Text(N)   | -         | -         | No        | Back
+O-X       | Text(O-X) | Text(O-X) | -         | -         | -         | Back
+Y         | Text(Y)   | Text(Y)   | -         | -         | Yes       | Back
+Z         | Text(Z)   | Text(Z)   | -         | -         | -         | Back
 ";
         assert_table_eq(&table, expected);
     }
