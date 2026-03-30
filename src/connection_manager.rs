@@ -525,6 +525,7 @@ impl ConnectionManager {
     }
 
     /// Resolve a table name (bare or qualified) to (qualified_name, connection_index).
+    #[allow(dead_code)]
     pub fn resolve_table(&self, name: &str) -> Result<(String, usize)> {
         if let Some(&idx) = self.table_to_conn.get(name) {
             // Find the canonical qualified name (for bare names that auto-resolved).
@@ -588,6 +589,7 @@ impl ConnectionManager {
     /// Return the fully-qualified display form of a table name.
     /// With multiple connections, always returns `alias.table`.
     /// With one connection, returns the bare name.
+    #[allow(dead_code)]
     pub fn display_name_for_table(&self, table: &str) -> String {
         let connected_count = self.connections.iter()
             .filter(|c| c.status.is_connected())
@@ -722,6 +724,7 @@ impl ConnectionManager {
 
 /// Summary of a connection for UI display.
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct ConnectionSummary {
     pub id: String,
     pub alias: String,

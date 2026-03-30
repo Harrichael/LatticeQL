@@ -24,6 +24,7 @@ impl Default for ColumnDefaults {
 }
 
 impl ColumnDefaults {
+    #[allow(dead_code)]
     pub fn for_table(&self, table: &str) -> &[String] {
         self.per_table.get(table).unwrap_or(&self.global)
     }
@@ -275,6 +276,7 @@ pub fn remove_saved_connection(
 }
 
 /// Kept for backward-compat; callers that only need columns can use this.
+#[allow(dead_code)]
 pub fn load_column_defaults() -> Result<ColumnDefaults> {
     Ok(load_config()?.columns)
 }

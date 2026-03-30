@@ -5,6 +5,7 @@ pub struct SchemaNode {
 }
 
 /// A column within a SchemaNode.
+#[allow(dead_code)]
 pub struct ColumnDef {
     pub name: String,
     pub data_type: String,

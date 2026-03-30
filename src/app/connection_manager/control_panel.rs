@@ -6,7 +6,7 @@ use super::widget::{
 };
 use crate::connection_manager::ConnectionType;
 use crate::app::tui::control_panel::ControlPanel;
-use crate::app::tui::keys::{EntityFocus, FocusLoci, InputFocus};
+use crate::app::tui::keys::{FocusLoci, InputFocus};
 
 impl ControlPanel for ConnManagerWidget {
     fn focus_loci(&self) -> FocusLoci {
@@ -256,6 +256,7 @@ impl ControlPanel for ConnManagerWidget {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::tui::keys::EntityFocus;
 
     fn empty_widget() -> ConnManagerWidget {
         ConnManagerWidget::new(vec![], vec![])

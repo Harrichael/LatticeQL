@@ -3,6 +3,7 @@ use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[allow(dead_code)]
 pub enum LogLevel {
     Info,
     Warn,
@@ -54,6 +55,7 @@ pub fn log(level: LogLevel, message: impl Into<String>) {
 
 pub fn info(message: impl Into<String>)  { log(LogLevel::Info,  message); }
 pub fn warn(message: impl Into<String>)  { log(LogLevel::Warn,  message); }
+#[allow(dead_code)]
 pub fn error(message: impl Into<String>) { log(LogLevel::Error, message); }
 
 /// Drain all pending log entries into the caller's buffer (called each event-loop tick).
