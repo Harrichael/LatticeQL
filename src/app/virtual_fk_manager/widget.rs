@@ -63,7 +63,6 @@ pub struct VirtualFkForm {
     pub type_value: String,
     pub to_table: String,
     pub to_column: String,
-    pub cursor: usize,
     pub type_options: Vec<(String, i64)>,
 }
 
@@ -77,7 +76,6 @@ impl VirtualFkForm {
             type_value: String::new(),
             to_table: String::new(),
             to_column: String::new(),
-            cursor: 0,
             type_options: Vec::new(),
         }
     }

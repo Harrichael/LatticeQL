@@ -73,7 +73,6 @@ impl ControlPanel for VfkWidget {
             if let Some(ref mut form) = self.form {
                 let next = form.active_field.next(form.type_column.is_empty());
                 form.active_field = next;
-                form.cursor = 0;
                 self.cursor = 0;
                 self.scroll = 0;
                 self.search.clear();
@@ -83,8 +82,6 @@ impl ControlPanel for VfkWidget {
                 // Pre-select "id" when switching to ToColumn
                 if form.active_field == VirtualFkField::ToColumn {
                     if let Some(to_cols) = self.table_columns.get(&form.to_table) {
-                        form.cursor = to_cols.iter().position(|c| c == "id").unwrap_or(0);
-                        self.cursor = form.cursor;
                     }
                 }
 
@@ -104,7 +101,6 @@ impl ControlPanel for VfkWidget {
             if let Some(ref mut form) = self.form {
                 let prev = form.active_field.prev(form.type_column.is_empty());
                 form.active_field = prev;
-                form.cursor = 0;
                 self.cursor = 0;
                 self.scroll = 0;
                 self.search.clear();
@@ -146,13 +142,11 @@ impl ControlPanel for VfkWidget {
                 form.type_column.clear();
                 form.type_value.clear();
                 form.active_field = VirtualFkField::IdColumn;
-                form.cursor = 0;
                 self.cursor = 0;
             }
             VirtualFkField::IdColumn => {
                 form.id_column = raw_value;
                 form.active_field = VirtualFkField::TypeColumn;
-                form.cursor = 0;
                 self.cursor = 0;
             }
             VirtualFkField::TypeColumn => {
@@ -169,7 +163,6 @@ impl ControlPanel for VfkWidget {
                         column: form.type_column.clone(),
                     };
                 }
-                form.cursor = 0;
                 self.cursor = 0;
             }
             VirtualFkField::TypeValue => {
@@ -178,7 +171,6 @@ impl ControlPanel for VfkWidget {
                     form.type_value = tv;
                 }
                 form.active_field = VirtualFkField::ToTable;
-                form.cursor = 0;
                 self.cursor = 0;
             }
             VirtualFkField::ToTable => {
@@ -186,10 +178,7 @@ impl ControlPanel for VfkWidget {
                 form.to_column.clear();
                 // Pre-select "id" column
                 if let Some(to_cols) = self.table_columns.get(&form.to_table) {
-                    form.cursor = to_cols.iter().position(|c| c == "id").unwrap_or(0);
-                    self.cursor = form.cursor;
                 } else {
-                    form.cursor = 0;
                     self.cursor = 0;
                 }
                 form.active_field = VirtualFkField::ToColumn;
@@ -254,7 +243,6 @@ impl ControlPanel for VfkWidget {
                 self.scroll = 0;
                 self.cursor = 0;
                 if let Some(ref mut form) = self.form {
-                    form.cursor = 0;
                 }
             }
             KeyCode::Backspace => {
@@ -263,7 +251,6 @@ impl ControlPanel for VfkWidget {
                 self.scroll = 0;
                 self.cursor = 0;
                 if let Some(ref mut form) = self.form {
-                    form.cursor = 0;
                 }
             }
             _ => {}
