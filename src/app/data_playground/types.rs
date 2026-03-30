@@ -44,7 +44,7 @@ pub enum Mode {
 #[derive(Debug, Clone, PartialEq)]
 pub enum ConfirmAction {
     /// Save a single connection — user decides whether to include the password.
-    SaveConnectionWithPassword { conn_index: usize },
+    SaveConnectionWithPassword { conn_id: String },
 }
 
 /// Commands available in the command palette (`:` key).

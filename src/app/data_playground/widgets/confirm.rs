@@ -53,7 +53,7 @@ mod tests {
     fn widget() -> ConfirmWidget {
         ConfirmWidget::new(
             "Save?".into(),
-            ConfirmAction::SaveConnectionWithPassword { conn_index: 0 },
+            ConfirmAction::SaveConnectionWithPassword { conn_id: "test".into() },
         )
     }
 

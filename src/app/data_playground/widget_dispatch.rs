@@ -44,9 +44,8 @@ pub(super) async fn dispatch_widgets(
         let widget = state.confirm.take().unwrap();
         if let Some(confirmed) = widget.confirmed {
             match widget.tag {
-                ConfirmAction::SaveConnectionWithPassword { conn_index } => {
-                    if conn_index < conn_mgr.connections.len() {
-                        let conn = &conn_mgr.connections[conn_index];
+                ConfirmAction::SaveConnectionWithPassword { conn_id } => {
+                    if let Some(conn) = conn_mgr.connections.iter().find(|c| c.id == conn_id) {
                         let alias = conn.alias.clone();
                         match config::save_connection(conn, &state.saved_connections, confirmed) {
                             Ok((path, updated)) => {
@@ -195,11 +194,12 @@ pub(super) async fn dispatch_widgets(
                             "Connection '{}' has a password. Save password to config file? (y/n)",
                             conn.alias
                         );
+                        let conn_id = conn.id.clone();
                         state.conn_manager = None;
                         state.confirm = Some(
                             super::widgets::confirm::ConfirmWidget::new(
                                 msg,
-                                ConfirmAction::SaveConnectionWithPassword { conn_index },
+                                ConfirmAction::SaveConnectionWithPassword { conn_id },
                             )
                         );
                     } else {
