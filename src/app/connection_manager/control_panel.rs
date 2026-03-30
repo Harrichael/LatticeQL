@@ -193,11 +193,9 @@ impl ControlPanel for ConnManagerWidget {
     fn on_save(&mut self) {
         if self.view == ConnManagerView::Tabs && self.tab == ConnManagerTab::Connections {
             if self.cursor < self.connections.len() {
-                let has_password = self.connections[self.cursor].url.contains("password")
-                    || self.connections[self.cursor].url.contains('@');
                 self.action = ConnManagerAction::SaveConnection {
                     conn_index: self.cursor,
-                    needs_password_confirm: has_password,
+                    needs_password_confirm: self.connections[self.cursor].has_password,
                 };
             }
         }

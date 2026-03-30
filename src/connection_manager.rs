@@ -714,6 +714,7 @@ impl ConnectionManager {
                 last_table_count: c.last_table_count,
                 last_synced: c.last_synced,
                 is_saved: saved_ids.contains(&c.id),
+                has_password: c.has_password(),
             })
             .collect()
     }
@@ -735,6 +736,8 @@ pub struct ConnectionSummary {
     pub last_synced: Option<DateTime<Local>>,
     /// Whether this connection is persisted in the config.
     pub is_saved: bool,
+    /// Whether this connection has a non-empty password in its params.
+    pub has_password: bool,
 }
 
 // ── Database trait implementation ───────────────────────────────────────────
