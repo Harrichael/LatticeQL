@@ -102,6 +102,7 @@ pub trait Database: Send + Sync {
 
     /// Return true when this database supports the `UUID_TO_BIN` / `BIN_TO_UUID`
     /// functions (MySQL 8+).  Defaults to false.
+    #[allow(dead_code)]
     fn supports_uuid_functions(&self) -> bool {
         false
     }

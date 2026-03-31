@@ -17,6 +17,7 @@ impl SqliteDb {
         Ok(Self { pool })
     }
 
+    #[allow(dead_code)]
     pub fn from_pool(pool: SqlitePool) -> Self {
         Self { pool }
     }

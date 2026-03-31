@@ -525,6 +525,7 @@ impl ConnectionManager {
     }
 
     /// Resolve a table name (bare or qualified) to (qualified_name, connection_index).
+    #[allow(dead_code)]
     pub fn resolve_table(&self, name: &str) -> Result<(String, usize)> {
         if let Some(&idx) = self.table_to_conn.get(name) {
             // Find the canonical qualified name (for bare names that auto-resolved).
@@ -588,6 +589,7 @@ impl ConnectionManager {
     /// Return the fully-qualified display form of a table name.
     /// With multiple connections, always returns `alias.table`.
     /// With one connection, returns the bare name.
+    #[allow(dead_code)]
     pub fn display_name_for_table(&self, table: &str) -> String {
         let connected_count = self.connections.iter()
             .filter(|c| c.status.is_connected())
@@ -714,6 +716,7 @@ impl ConnectionManager {
                 last_table_count: c.last_table_count,
                 last_synced: c.last_synced,
                 is_saved: saved_ids.contains(&c.id),
+                has_password: c.has_password(),
             })
             .collect()
     }
@@ -721,6 +724,7 @@ impl ConnectionManager {
 
 /// Summary of a connection for UI display.
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct ConnectionSummary {
     pub id: String,
     pub alias: String,
@@ -735,6 +739,8 @@ pub struct ConnectionSummary {
     pub last_synced: Option<DateTime<Local>>,
     /// Whether this connection is persisted in the config.
     pub is_saved: bool,
+    /// Whether this connection has a non-empty password in its params.
+    pub has_password: bool,
 }
 
 // ── Database trait implementation ───────────────────────────────────────────

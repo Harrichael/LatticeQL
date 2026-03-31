@@ -39,6 +39,7 @@ pub struct Schema {
 
 impl Schema {
     /// Explore all tables in the database and build the schema.
+    #[allow(dead_code)]
     pub async fn explore(db: &dyn Database) -> Result<Self> {
         let table_names = db.list_tables().await?;
         eprintln!("Found {} tables, loading metadata…", table_names.len());

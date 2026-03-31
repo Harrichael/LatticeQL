@@ -7,6 +7,7 @@ use std::collections::HashMap;
 
 /// A node in the hierarchical data tree.
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct DataNode {
     pub table: String,
     pub row: Row,
@@ -32,6 +33,7 @@ impl DataNode {
     }
 
     /// Return a short string summary for display (first pk-like column).
+    #[allow(dead_code)]
     pub fn summary(&self) -> String {
         let id_candidates = ["id", "name", "title", "label"];
         for candidate in &id_candidates {
@@ -434,6 +436,7 @@ fn flatten_node<'a>(
 
 /// Collect all extra column names available for a node (those not in
 /// visible_columns).
+#[allow(dead_code)]
 pub fn available_extra_columns(node: &DataNode) -> Vec<String> {
     node.row
         .keys()
