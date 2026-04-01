@@ -22,6 +22,7 @@ use rules::Completion;
 use std::io;
 use connection_manager::{ConnectionManager, ConnectionType};
 use ui::app::{AppState, ColumnManagerItem, ConfirmAction, ConnectionForm, ConnectionManagerTab, Mode, VirtualFkField, VirtualFkForm};
+use ui::select_list::SelectList;
 use schema::VirtualFkDef;
 
 /// LatticeQL — Navigate complex datasets from multiple sources intuitively.
@@ -358,41 +359,48 @@ async fn handle_key(
 
     // Column manager overlay has exclusive key handling while open.
     if state.column_add.is_some() {
-        // Helper: get filtered indices for current search
-        let filtered: Vec<usize> = if let Some((_, ref items, _)) = state.column_add {
-            let q = state.overlay_search.to_lowercase();
-            items.iter().enumerate()
+        let (filtered, flen, search_active) = if let Some((_, ref items, ref list)) = state.column_add {
+            let q = list.search_query().to_lowercase();
+            let f: Vec<usize> = items.iter().enumerate()
                 .filter(|(_, it)| q.is_empty() || it.name.to_lowercase().contains(&q))
                 .map(|(i, _)| i)
-                .collect()
-        } else { vec![] };
+                .collect();
+            let len = f.len();
+            let sa = list.search_active();
+            (f, len, sa)
+        } else { (vec![], 0, false) };
 
         match key.code {
-            // Navigation always fires
-            KeyCode::Up | KeyCode::Char('k') => {
-                if let Some((_, _, ref mut cursor)) = state.column_add {
-                    if *cursor > 0 { *cursor -= 1; }
+            KeyCode::Up => {
+                if let Some((_, _, ref mut list)) = state.column_add { list.move_up(); }
+            }
+            KeyCode::Char('k') if !search_active => {
+                if let Some((_, _, ref mut list)) = state.column_add { list.move_up(); }
+            }
+            KeyCode::Down => {
+                if let Some((_, _, ref mut list)) = state.column_add { list.move_down(flen); }
+            }
+            KeyCode::Char('j') if !search_active => {
+                if let Some((_, _, ref mut list)) = state.column_add { list.move_down(flen); }
+            }
+            KeyCode::Char('u') if !search_active => {
+                if let Some((_, ref mut items, ref mut list)) = state.column_add {
+                    if let Some((a, b)) = list.move_item_up() {
+                        items.swap(a, b);
+                    }
                 }
             }
-            KeyCode::Down | KeyCode::Char('j') => {
-                if let Some((_, _, ref mut cursor)) = state.column_add {
-                    let max = filtered.len().saturating_sub(1);
-                    if *cursor < max { *cursor += 1; }
-                }
-            }
-            KeyCode::Char('u') if state.overlay_search.is_empty() => {
-                if let Some((_, ref mut items, ref mut cursor)) = state.column_add {
-                    if *cursor > 0 { items.swap(*cursor, *cursor - 1); *cursor -= 1; }
-                }
-            }
-            KeyCode::Char('d') if state.overlay_search.is_empty() => {
-                if let Some((_, ref mut items, ref mut cursor)) = state.column_add {
-                    if *cursor + 1 < items.len() { items.swap(*cursor, *cursor + 1); *cursor += 1; }
+            KeyCode::Char('d') if !search_active => {
+                if let Some((_, ref mut items, ref mut list)) = state.column_add {
+                    let len = items.len();
+                    if let Some((a, b)) = list.move_item_down(len) {
+                        items.swap(a, b);
+                    }
                 }
             }
             KeyCode::Char(' ') | KeyCode::Char('x') => {
-                if let Some((_, ref mut items, cursor)) = state.column_add {
-                    if let Some(&orig_idx) = filtered.get(cursor) {
+                if let Some((_, ref mut items, ref list)) = state.column_add {
+                    if let Some(&orig_idx) = filtered.get(list.cursor) {
                         if let Some(item) = items.get_mut(orig_idx) { item.enabled = !item.enabled; }
                     }
                 }
@@ -403,36 +411,24 @@ async fn handle_key(
                     state.tree_visible_columns.insert(table.clone(), enabled);
                     state.tree_column_order.insert(table, items.iter().map(|i| i.name.clone()).collect());
                 }
-                state.reset_overlay_search();
                 state.column_add = None;
             }
-            // Activate search
-            KeyCode::Char('/') if !state.overlay_search_active => {
-                state.overlay_search_active = true;
+            KeyCode::Char('/') if !search_active => {
+                if let Some((_, _, ref mut list)) = state.column_add { list.activate_search(); }
             }
-            // Esc: 3-level exit
             KeyCode::Esc => {
-                if state.overlay_search_active {
-                    state.overlay_search_active = false;
-                } else if !state.overlay_search.is_empty() {
-                    state.overlay_search.clear();
-                    state.overlay_scroll = 0;
-                    if let Some((_, _, ref mut cursor)) = state.column_add { *cursor = 0; }
-                } else {
-                    state.reset_overlay_search();
+                let close = if let Some((_, _, ref mut list)) = state.column_add {
+                    list.handle_esc() == ui::select_list::EscAction::Close
+                } else { true };
+                if close {
                     state.column_add = None;
                 }
             }
-            // Search input when active
-            KeyCode::Backspace if state.overlay_search_active => {
-                state.overlay_search.pop();
-                state.overlay_scroll = 0;
-                if let Some((_, _, ref mut cursor)) = state.column_add { *cursor = 0; }
+            KeyCode::Backspace if search_active => {
+                if let Some((_, _, ref mut list)) = state.column_add { list.search_pop(); }
             }
-            KeyCode::Char(c) if state.overlay_search_active => {
-                state.overlay_search.push(c);
-                state.overlay_scroll = 0;
-                if let Some((_, _, ref mut cursor)) = state.column_add { *cursor = 0; }
+            KeyCode::Char(c) if search_active => {
+                if let Some((_, _, ref mut list)) = state.column_add { list.search_push(c); }
             }
             _ => {}
         }
@@ -475,12 +471,11 @@ async fn handle_key(
                 KeyCode::Char('r') => {
                     if !engine.rules.is_empty() {
                         state.rules = engine.rules.clone();
-                        state.rule_cursor = 0;
                         state.next_rule_cursor =
                             state.next_rule_cursor.min(state.rules.len());
                         state.rule_reorder_undo.clear();
                         state.rule_reorder_redo.clear();
-                        state.mode = Mode::RuleReorder;
+                        state.mode = Mode::RuleReorder { list: SelectList::new() };
                     }
                 }
                 KeyCode::Char('c') => {
@@ -495,14 +490,12 @@ async fn handle_key(
                             &node.table,
                         );
                         if !items.is_empty() {
-                            state.reset_overlay_search();
-                            state.column_add = Some((node.table.clone(), items, 0));
+                            state.column_add = Some((node.table.clone(), items, SelectList::with_search()));
                         }
                     }
                 }
                 KeyCode::Char('v') => {
-                    state.reset_overlay_search();
-                    state.mode = Mode::VirtualFkManager { cursor: 0 };
+                    state.mode = Mode::VirtualFkManager { list: SelectList::with_search() };
                 }
                 KeyCode::Char('x') => {
                     // Prune (remove) the currently selected node from the tree.
@@ -536,17 +529,18 @@ async fn handle_key(
                     }
                 }
                 KeyCode::Char('l') => {
-                    state.mode = Mode::LogViewer { cursor: state.logs.len().saturating_sub(1) };
+                    let mut list = SelectList::new();
+                    list.cursor = state.logs.len().saturating_sub(1);
+                    state.mode = Mode::LogViewer { list };
                 }
                 KeyCode::Char('m') => {
-                    state.mode = Mode::ManualList { cursor: 0 };
+                    state.mode = Mode::ManualList { list: SelectList::new() };
                 }
                 KeyCode::Char('+') => {
-                    state.reset_overlay_search();
                     state.connections_summary = conn_mgr.connection_summaries(&saved_ids(state));
                     state.mode = Mode::ConnectionManager {
                         tab: ConnectionManagerTab::Connections,
-                        cursor: 0,
+                        list: SelectList::new(),
                     };
                 }
                 _ => {}
@@ -720,21 +714,17 @@ async fn handle_key(
         }
 
         // ── Path selection overlay ────────────────────────────────────────
-        Mode::PathSelection => {
+        Mode::PathSelection { ref mut list } => {
             match key.code {
                 KeyCode::Esc => {
                     state.mode = Mode::Normal;
                     *pending_paths = None;
                 }
                 KeyCode::Up | KeyCode::Char('k') => {
-                    if state.path_cursor > 0 {
-                        state.path_cursor -= 1;
-                    }
+                    list.move_up();
                 }
                 KeyCode::Down | KeyCode::Char('j') => {
-                    if state.path_cursor + 1 < state.paths.len() {
-                        state.path_cursor += 1;
-                    }
+                    list.move_down(state.paths.len());
                 }
                 KeyCode::Char('n') if state.paths_has_more => {
                     if let Some((ref rule, ref mut paths)) = *pending_paths {
@@ -751,8 +741,9 @@ async fn handle_key(
                     }
                 }
                 KeyCode::Enter => {
+                    let cursor = list.cursor;
                     if let Some((rule, paths)) = pending_paths.take() {
-                        let chosen = &paths[state.path_cursor];
+                        let chosen = &paths[cursor];
                         // Apply the chosen path
                         engine.apply_relation_rule(db, chosen).await?;
                         // Update rule with the chosen path stored as resolved_path
@@ -785,13 +776,13 @@ async fn handle_key(
         }
 
         // ── Rule reorder overlay ─────────────────────────────────────────
-        Mode::RuleReorder => {
-            let push_rule_reorder_undo = |state: &mut AppState| {
+        Mode::RuleReorder { ref mut list } => {
+            let push_rule_reorder_undo = |state: &mut AppState, cursor: usize| {
                 state
                     .rule_reorder_undo
                     .push((
                         state.rules.clone(),
-                        state.rule_cursor,
+                        cursor,
                         state.next_rule_cursor,
                     ));
                 state.rule_reorder_redo.clear();
@@ -813,49 +804,44 @@ async fn handle_key(
                     state.mode = Mode::Normal;
                 }
                 KeyCode::Up | KeyCode::Char('k') => {
-                    if state.rule_cursor > 0 {
-                        state.rule_cursor -= 1;
-                    }
+                    list.move_up();
                 }
                 KeyCode::Down | KeyCode::Char('j') => {
-                    if state.rule_cursor + 1 < state.rules.len() {
-                        state.rule_cursor += 1;
-                    }
+                    list.move_down(state.rules.len());
                 }
                 KeyCode::Char('u') => {
                     // Swap up
-                    if state.rule_cursor > 0 {
-                        push_rule_reorder_undo(state);
-                        state.rules.swap(state.rule_cursor, state.rule_cursor - 1);
-                        state.rule_cursor -= 1;
+                    if let Some((a, b)) = list.move_item_up() {
+                        push_rule_reorder_undo(state, a + 1);
+                        state.rules.swap(a, b);
                     }
                 }
                 KeyCode::Char('d') => {
                     // Swap down
-                    if state.rule_cursor + 1 < state.rules.len() {
-                        push_rule_reorder_undo(state);
-                        state.rules.swap(state.rule_cursor, state.rule_cursor + 1);
-                        state.rule_cursor += 1;
+                    let len = state.rules.len();
+                    if let Some((a, b)) = list.move_item_down(len) {
+                        push_rule_reorder_undo(state, a);
+                        state.rules.swap(a, b);
                     }
                 }
                 KeyCode::Char('x') => {
                     if !state.rules.is_empty() {
-                        push_rule_reorder_undo(state);
-                        state.rules.remove(state.rule_cursor);
+                        push_rule_reorder_undo(state, list.cursor);
+                        state.rules.remove(list.cursor);
                         if state.rules.is_empty() {
-                            state.rule_cursor = 0;
+                            list.cursor = 0;
                             state.next_rule_cursor = 0;
-                        } else if state.rule_cursor >= state.rules.len() {
-                            state.rule_cursor = state.rules.len() - 1;
+                        } else {
+                            list.clamp_cursor(state.rules.len());
                         }
                         state.next_rule_cursor = state.next_rule_cursor.min(state.rules.len());
                     }
                 }
                 KeyCode::Char('i') => {
-                    state.next_rule_cursor = state.rule_cursor.min(state.rules.len());
+                    state.next_rule_cursor = list.cursor.min(state.rules.len());
                 }
                 KeyCode::Char('o') => {
-                    state.next_rule_cursor = (state.rule_cursor + 1).min(state.rules.len());
+                    state.next_rule_cursor = (list.cursor + 1).min(state.rules.len());
                 }
                 KeyCode::Char('z') => {
                     if let Some((rules, cursor, next_cursor)) = state.rule_reorder_undo.pop() {
@@ -863,11 +849,11 @@ async fn handle_key(
                             .rule_reorder_redo
                             .push((
                                 state.rules.clone(),
-                                state.rule_cursor,
+                                list.cursor,
                                 state.next_rule_cursor,
                             ));
                         state.rules = rules;
-                        state.rule_cursor = cursor.min(state.rules.len().saturating_sub(1));
+                        list.cursor = cursor.min(state.rules.len().saturating_sub(1));
                         state.next_rule_cursor = next_cursor.min(state.rules.len());
                     }
                 }
@@ -877,11 +863,11 @@ async fn handle_key(
                             .rule_reorder_undo
                             .push((
                                 state.rules.clone(),
-                                state.rule_cursor,
+                                list.cursor,
                                 state.next_rule_cursor,
                             ));
                         state.rules = rules;
-                        state.rule_cursor = cursor.min(state.rules.len().saturating_sub(1));
+                        list.cursor = cursor.min(state.rules.len().saturating_sub(1));
                         state.next_rule_cursor = next_cursor.min(state.rules.len());
                     }
                 }
@@ -895,53 +881,42 @@ async fn handle_key(
         }
 
         // ── Log viewer ───────────────────────────────────────────────────
-        Mode::LogViewer { cursor } => {
+        Mode::LogViewer { ref mut list } => {
             match key.code {
                 KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('l') => {
                     state.mode = Mode::Normal;
                 }
                 KeyCode::Up | KeyCode::Char('k') => {
-                    if cursor > 0 {
-                        state.mode = Mode::LogViewer { cursor: cursor - 1 };
-                    }
+                    list.move_up();
                 }
                 KeyCode::Down | KeyCode::Char('j') => {
-                    if cursor + 1 < state.logs.len() {
-                        state.mode = Mode::LogViewer { cursor: cursor + 1 };
-                    }
+                    list.move_down(state.logs.len());
                 }
                 _ => {}
             }
         }
 
         // ── Virtual FK manager ───────────────────────────────────────────
-        Mode::VirtualFkManager { cursor } => {
-            let filtered: Vec<usize> = {
-                let q = state.overlay_search.to_lowercase();
-                state.virtual_fks.iter().enumerate()
-                    .filter(|(_, vfk)| q.is_empty() || vfk.from_table.to_lowercase().contains(&q) || vfk.to_table.to_lowercase().contains(&q) || vfk.type_value.as_deref().unwrap_or("").to_lowercase().contains(&q))
-                    .map(|(i, _)| i)
-                    .collect()
-            };
+        Mode::VirtualFkManager { ref mut list } => {
+            let q = list.search_query().to_lowercase();
+            let filtered: Vec<usize> = state.virtual_fks.iter().enumerate()
+                .filter(|(_, vfk)| q.is_empty() || vfk.from_table.to_lowercase().contains(&q) || vfk.to_table.to_lowercase().contains(&q) || vfk.type_value.as_deref().unwrap_or("").to_lowercase().contains(&q))
+                .map(|(i, _)| i)
+                .collect();
+            let flen = filtered.len();
             match key.code {
-                // Navigation always fires
-                KeyCode::Up | KeyCode::Char('k') => {
-                    if cursor > 0 { state.mode = Mode::VirtualFkManager { cursor: cursor - 1 }; }
-                }
-                KeyCode::Down | KeyCode::Char('j') => {
-                    let max = filtered.len().saturating_sub(1);
-                    if cursor < max { state.mode = Mode::VirtualFkManager { cursor: cursor + 1 }; }
-                }
-                KeyCode::Char('a') => {
-                    state.reset_overlay_search();
+                KeyCode::Up => { list.move_up(); }
+                KeyCode::Char('k') if !list.search_active() => { list.move_up(); }
+                KeyCode::Down => { list.move_down(flen); }
+                KeyCode::Char('j') if !list.search_active() => { list.move_down(flen); }
+                KeyCode::Char('a') if !list.search_active() => {
                     state.mode = Mode::VirtualFkAdd(VirtualFkForm::new());
                 }
-                KeyCode::Char('d') | KeyCode::Char('x') if !state.overlay_search_active => {
-                    if let Some(&orig_idx) = filtered.get(cursor) {
+                KeyCode::Char('d') | KeyCode::Char('x') if !list.search_active() => {
+                    if let Some(&orig_idx) = filtered.get(list.cursor) {
                         let removed = state.virtual_fks.remove(orig_idx);
                         engine.schema.virtual_fks.retain(|v| v != &removed);
-                        let new_cursor = cursor.saturating_sub(if cursor >= filtered.len().saturating_sub(1) { 1 } else { 0 });
-                        state.mode = Mode::VirtualFkManager { cursor: new_cursor };
+                        list.clamp_cursor(filtered.len().saturating_sub(1));
                     }
                 }
                 KeyCode::Char('s') if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) => {
@@ -950,34 +925,16 @@ async fn handle_key(
                         Err(e) => { state.mode = Mode::Error(format!("Save failed: {}", e)); }
                     }
                 }
-                // Activate search
-                KeyCode::Char('/') if !state.overlay_search_active => {
-                    state.overlay_search_active = true;
+                KeyCode::Char('/') if !list.search_active() => {
+                    list.activate_search();
                 }
-                // Esc: 3-level exit
                 KeyCode::Esc => {
-                    if state.overlay_search_active {
-                        state.overlay_search_active = false;
-                    } else if !state.overlay_search.is_empty() {
-                        state.overlay_search.clear();
-                        state.overlay_scroll = 0;
-                        state.mode = Mode::VirtualFkManager { cursor: 0 };
-                    } else {
-                        state.reset_overlay_search();
+                    if list.handle_esc() == ui::select_list::EscAction::Close {
                         state.mode = Mode::Normal;
                     }
                 }
-                // Search input when active
-                KeyCode::Backspace if state.overlay_search_active => {
-                    state.overlay_search.pop();
-                    state.overlay_scroll = 0;
-                    state.mode = Mode::VirtualFkManager { cursor: 0 };
-                }
-                KeyCode::Char(c) if state.overlay_search_active => {
-                    state.overlay_search.push(c);
-                    state.overlay_scroll = 0;
-                    state.mode = Mode::VirtualFkManager { cursor: 0 };
-                }
+                KeyCode::Backspace if list.search_active() => { list.search_pop(); }
+                KeyCode::Char(c) if list.search_active() => { list.search_push(c); }
                 _ => {}
             }
         }
@@ -985,17 +942,6 @@ async fn handle_key(
         // ── Virtual FK creation form ────────────────────────────────────
         Mode::VirtualFkAdd(ref form_state) => {
             let form = form_state.clone();
-
-            // Helper macro: build filtered original-indices for a slice
-            macro_rules! filtered_indices {
-                ($items:expr) => {{
-                    let q = state.overlay_search.to_lowercase();
-                    $items.iter().enumerate()
-                        .filter(|(_, s)| q.is_empty() || s.to_lowercase().contains(&q))
-                        .map(|(i, _)| i)
-                        .collect::<Vec<_>>()
-                }};
-            }
 
             // Build the dropdown items for the currently active field.
             let dropdown_items: Vec<String> = match &form.active_field {
@@ -1020,22 +966,29 @@ async fn handle_key(
                 }
             };
 
+            // Compute filtered count for navigation
+            let flen = {
+                let q = form.list.search_query().to_lowercase();
+                dropdown_items.iter()
+                    .filter(|s| q.is_empty() || s.to_lowercase().contains(&q))
+                    .count()
+            };
+            let search_active = form.list.search_active();
+
             match key.code {
                 // ── Tab: advance to next field ─────────────────────────
                 KeyCode::Tab => {
                     if let Mode::VirtualFkAdd(f) = &mut state.mode {
                         let next = f.active_field.next(f.type_column.is_empty());
                         f.active_field = next;
-                        f.cursor = 0;
+                        f.list.cursor = 0;
+                        f.list.reset_search();
                     }
-                    state.overlay_search.clear();
-                    state.overlay_search_active = false;
-                    state.overlay_scroll = 0;
                     // Pre-select "id" when switching to ToColumn
                     if let Mode::VirtualFkAdd(f) = &mut state.mode {
                         if f.active_field == VirtualFkField::ToColumn {
                             let to_cols = state.table_columns.get(&f.to_table).cloned().unwrap_or_default();
-                            f.cursor = to_cols.iter().position(|c| c == "id").unwrap_or(0);
+                            f.list.cursor = to_cols.iter().position(|c| c == "id").unwrap_or(0);
                         }
                     }
                     // Load type options when switching to TypeValue
@@ -1056,11 +1009,9 @@ async fn handle_key(
                     if let Mode::VirtualFkAdd(f) = &mut state.mode {
                         let prev = f.active_field.prev(f.type_column.is_empty());
                         f.active_field = prev;
-                        f.cursor = 0;
+                        f.list.cursor = 0;
+                        f.list.reset_search();
                     }
-                    state.overlay_search.clear();
-                    state.overlay_search_active = false;
-                    state.overlay_scroll = 0;
                     // Load type options when switching back to TypeValue
                     if let Mode::VirtualFkAdd(f) = &state.mode {
                         if f.active_field == VirtualFkField::TypeValue && !f.type_column.is_empty() {
@@ -1075,86 +1026,76 @@ async fn handle_key(
                 }
 
                 // ── Up/Down: navigate the active dropdown ──────────────
-                // Arrow keys always navigate regardless of search state.
-                // 'k'/'j' only navigate when search input is not active
-                // (when search is active they fall through to the Char(c) handler).
                 KeyCode::Up => {
-                    let c = state.wizard_cursor();
-                    if c > 0 { state.wizard_set_cursor(c - 1); }
+                    if let Mode::VirtualFkAdd(f) = &mut state.mode { f.list.move_up(); }
                 }
-                KeyCode::Char('k') if !state.overlay_search_active => {
-                    let c = state.wizard_cursor();
-                    if c > 0 { state.wizard_set_cursor(c - 1); }
+                KeyCode::Char('k') if !search_active => {
+                    if let Mode::VirtualFkAdd(f) = &mut state.mode { f.list.move_up(); }
                 }
                 KeyCode::Down => {
-                    let fi = filtered_indices!(dropdown_items);
-                    let c = state.wizard_cursor();
-                    if c + 1 < fi.len() { state.wizard_set_cursor(c + 1); }
+                    if let Mode::VirtualFkAdd(f) = &mut state.mode { f.list.move_down(flen); }
                 }
-                KeyCode::Char('j') if !state.overlay_search_active => {
-                    let fi = filtered_indices!(dropdown_items);
-                    let c = state.wizard_cursor();
-                    if c + 1 < fi.len() { state.wizard_set_cursor(c + 1); }
+                KeyCode::Char('j') if !search_active => {
+                    if let Mode::VirtualFkAdd(f) = &mut state.mode { f.list.move_down(flen); }
                 }
 
                 // ── / : activate search ───────────────────────────────
-                KeyCode::Char('/') if !state.overlay_search_active => {
-                    state.overlay_search_active = true;
+                KeyCode::Char('/') if !search_active => {
+                    if let Mode::VirtualFkAdd(f) = &mut state.mode { f.list.activate_search(); }
                 }
 
                 // ── Esc: 3-level exit ─────────────────────────────────
                 KeyCode::Esc => {
-                    if state.overlay_search_active {
-                        state.overlay_search_active = false;
-                    } else if !state.overlay_search.is_empty() {
-                        state.overlay_search.clear();
-                        state.overlay_scroll = 0;
-                        state.wizard_set_cursor(0);
+                    let close = if let Mode::VirtualFkAdd(f) = &mut state.mode {
+                        f.list.handle_esc() == ui::select_list::EscAction::Close
                     } else {
-                        state.reset_overlay_search();
-                        state.mode = Mode::VirtualFkManager { cursor: 0 };
+                        true
+                    };
+                    if close {
+                        state.mode = Mode::VirtualFkManager { list: SelectList::with_search() };
                     }
                 }
 
                 // ── Enter: confirm selection for active field ─────────
                 KeyCode::Enter => {
-                    let fi = filtered_indices!(dropdown_items);
-                    if let Some(&orig) = fi.get(form.cursor) {
+                    let fi = {
+                        let q = form.list.search_query().to_lowercase();
+                        dropdown_items.iter().enumerate()
+                            .filter(|(_, s)| q.is_empty() || s.to_lowercase().contains(&q))
+                            .map(|(i, _)| i)
+                            .collect::<Vec<_>>()
+                    };
+                    if let Some(&orig) = fi.get(form.list.cursor) {
                         if let Some(raw_value) = dropdown_items.get(orig) {
                             let raw_value = raw_value.clone();
-                            state.reset_overlay_search();
 
                             if let Mode::VirtualFkAdd(f) = &mut state.mode {
+                                f.list.reset_search();
+                                f.list.cursor = 0;
                                 match &f.active_field {
                                     VirtualFkField::FromTable => {
                                         f.from_table = raw_value;
-                                        // Reset dependent fields when source table changes
                                         f.id_column.clear();
                                         f.type_column.clear();
                                         f.type_value.clear();
                                         f.active_field = VirtualFkField::IdColumn;
-                                        f.cursor = 0;
                                     }
                                     VirtualFkField::IdColumn => {
                                         f.id_column = raw_value;
                                         f.active_field = VirtualFkField::TypeColumn;
-                                        f.cursor = 0;
                                     }
                                     VirtualFkField::TypeColumn => {
                                         if raw_value.starts_with("(none") {
                                             f.type_column.clear();
                                             f.type_value.clear();
-                                            // Skip TypeValue — jump straight to ToTable
                                             f.active_field = VirtualFkField::ToTable;
                                         } else {
                                             f.type_column = raw_value;
                                             f.active_field = VirtualFkField::TypeValue;
                                         }
-                                        f.cursor = 0;
                                     }
                                     VirtualFkField::TypeValue => {
                                         if !raw_value.starts_with("(no type_column") {
-                                            // Strip the "  (count)" suffix
                                             let tv = raw_value
                                                 .split("  (")
                                                 .next()
@@ -1163,20 +1104,17 @@ async fn handle_key(
                                             f.type_value = tv;
                                         }
                                         f.active_field = VirtualFkField::ToTable;
-                                        f.cursor = 0;
                                     }
                                     VirtualFkField::ToTable => {
                                         f.to_table = raw_value;
                                         f.to_column.clear();
-                                        // Pre-select "id" column if it exists
                                         let to_cols = state.table_columns
                                             .get(&f.to_table).cloned().unwrap_or_default();
-                                        f.cursor = to_cols.iter().position(|c| c == "id").unwrap_or(0);
+                                        f.list.cursor = to_cols.iter().position(|c| c == "id").unwrap_or(0);
                                         f.active_field = VirtualFkField::ToColumn;
                                     }
                                     VirtualFkField::ToColumn => {
                                         f.to_column = raw_value;
-                                        // Commit when all required fields are filled
                                         if f.is_complete() {
                                             let vfk = VirtualFkDef {
                                                 from_table: f.from_table.clone(),
@@ -1188,10 +1126,9 @@ async fn handle_key(
                                             };
                                             state.virtual_fks.push(vfk.clone());
                                             engine.schema.virtual_fks.push(vfk);
-                                            state.reset_overlay_search();
-                                            state.mode = Mode::VirtualFkManager {
-                                                cursor: state.virtual_fks.len().saturating_sub(1),
-                                            };
+                                            let mut mgr_list = SelectList::with_search();
+                                            mgr_list.cursor = state.virtual_fks.len().saturating_sub(1);
+                                            state.mode = Mode::VirtualFkManager { list: mgr_list };
                                             return Ok(true);
                                         }
                                     }
@@ -1230,7 +1167,6 @@ async fn handle_key(
                         engine.schema.virtual_fks.push(vfk);
                         match config::save_virtual_fks(&state.virtual_fks) {
                             Ok(path) => {
-                                state.reset_overlay_search();
                                 state.mode = Mode::Info(format!("Virtual FK saved to {}", path.display()));
                             }
                             Err(e) => {
@@ -1241,15 +1177,11 @@ async fn handle_key(
                 }
 
                 // ── Search input: printable chars when active ──────────
-                KeyCode::Backspace if state.overlay_search_active => {
-                    state.overlay_search.pop();
-                    state.overlay_scroll = 0;
-                    state.wizard_set_cursor(0);
+                KeyCode::Backspace if search_active => {
+                    if let Mode::VirtualFkAdd(f) = &mut state.mode { f.list.search_pop(); }
                 }
-                KeyCode::Char(c) if state.overlay_search_active => {
-                    state.overlay_search.push(c);
-                    state.overlay_scroll = 0;
-                    state.wizard_set_cursor(0);
+                KeyCode::Char(c) if search_active => {
+                    if let Mode::VirtualFkAdd(f) = &mut state.mode { f.list.search_push(c); }
                 }
 
                 _ => {}
@@ -1291,7 +1223,7 @@ async fn handle_key(
         }
 
         // ── Connection manager overlay ─────────────────────────────────
-        Mode::ConnectionManager { tab, cursor } => {
+        Mode::ConnectionManager { tab, ref mut list } => {
             match key.code {
                 KeyCode::Esc => {
                     state.mode = Mode::Normal;
@@ -1302,7 +1234,7 @@ async fn handle_key(
                         ConnectionManagerTab::Saved => ConnectionManagerTab::Connectors,
                         ConnectionManagerTab::Connectors => ConnectionManagerTab::Connections,
                     };
-                    state.mode = Mode::ConnectionManager { tab: new_tab, cursor: 0 };
+                    state.mode = Mode::ConnectionManager { tab: new_tab, list: SelectList::new() };
                 }
                 KeyCode::Left | KeyCode::BackTab => {
                     let new_tab = match tab {
@@ -1310,30 +1242,27 @@ async fn handle_key(
                         ConnectionManagerTab::Saved => ConnectionManagerTab::Connections,
                         ConnectionManagerTab::Connectors => ConnectionManagerTab::Saved,
                     };
-                    state.mode = Mode::ConnectionManager { tab: new_tab, cursor: 0 };
+                    state.mode = Mode::ConnectionManager { tab: new_tab, list: SelectList::new() };
                 }
                 KeyCode::Up | KeyCode::Char('k') => {
-                    if cursor > 0 {
-                        state.mode = Mode::ConnectionManager { tab, cursor: cursor - 1 };
-                    }
+                    list.move_up();
                 }
                 KeyCode::Down | KeyCode::Char('j') => {
-                    let max = match &tab {
+                    let len = match &tab {
                         ConnectionManagerTab::Connections => {
-                            state.connections_summary.len().saturating_sub(1)
+                            state.connections_summary.len()
                         }
                         ConnectionManagerTab::Saved => {
-                            state.saved_connections.len().saturating_sub(1)
+                            state.saved_connections.len()
                         }
                         ConnectionManagerTab::Connectors => {
-                            ConnectionType::all().len().saturating_sub(1)
+                            ConnectionType::all().len()
                         }
                     };
-                    if cursor < max {
-                        state.mode = Mode::ConnectionManager { tab, cursor: cursor + 1 };
-                    }
+                    list.move_down(len);
                 }
                 KeyCode::Enter => {
+                    let cursor = list.cursor;
                     match &tab {
                         ConnectionManagerTab::Connectors => {
                             let types = ConnectionType::all();
@@ -1379,12 +1308,13 @@ async fn handle_key(
                                     let _ = conn_mgr.reconnect(cursor).await;
                                 }
                                 refresh_schema_from_conn_mgr(state, engine, conn_mgr);
-                                state.mode = Mode::ConnectionManager { tab, cursor };
+                                state.mode = Mode::ConnectionManager { tab, list: SelectList::new() };
                             }
                         }
                     }
                 }
                 KeyCode::Char('d') | KeyCode::Char('x') => {
+                    let cursor = list.cursor;
                     if tab == ConnectionManagerTab::Saved && cursor < state.saved_connections.len() {
                         let removed_id = state.saved_connections[cursor].id.clone();
                         // Persist removal to config.
@@ -1395,16 +1325,17 @@ async fn handle_key(
                         }
                         // Refresh summaries so is_saved updates for any live connection with this ID.
                         state.connections_summary = conn_mgr.connection_summaries(&saved_ids(state));
-                        let new_cursor = cursor.min(state.saved_connections.len().saturating_sub(1));
-                        state.mode = Mode::ConnectionManager { tab, cursor: new_cursor };
+                        list.clamp_cursor(state.saved_connections.len());
                     } else if tab == ConnectionManagerTab::Connections && cursor < conn_mgr.connections.len() {
                         conn_mgr.remove_connection(cursor);
                         refresh_schema_from_conn_mgr(state, engine, conn_mgr);
-                        let new_cursor = cursor.min(conn_mgr.connections.len().saturating_sub(1));
-                        state.mode = Mode::ConnectionManager { tab, cursor: new_cursor };
+                        let mut new_list = SelectList::new();
+                        new_list.cursor = cursor.min(conn_mgr.connections.len().saturating_sub(1));
+                        state.mode = Mode::ConnectionManager { tab, list: new_list };
                     }
                 }
                 KeyCode::Char('s') if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) => {
+                    let cursor = list.cursor;
                     if tab == ConnectionManagerTab::Connections && cursor < conn_mgr.connections.len() {
                         let conn = &conn_mgr.connections[cursor];
                         if conn.has_password() {
@@ -1439,9 +1370,11 @@ async fn handle_key(
             let alias = alias.clone();
             match key.code {
                 KeyCode::Esc => {
+                    let mut list = SelectList::new();
+                    list.cursor = saved_index;
                     state.mode = Mode::ConnectionManager {
                         tab: ConnectionManagerTab::Saved,
-                        cursor: saved_index,
+                        list,
                     };
                 }
                 KeyCode::Enter => {
@@ -1468,9 +1401,11 @@ async fn handle_key(
                                         }
                                         Err(_) => {
                                             let conn_idx = conn_mgr.connections.len().saturating_sub(1);
+                                            let mut list = SelectList::new();
+                                            list.cursor = conn_idx;
                                             state.mode = Mode::ConnectionManager {
                                                 tab: ConnectionManagerTab::Connections,
-                                                cursor: conn_idx,
+                                                list,
                                             };
                                         }
                                     }
@@ -1503,7 +1438,7 @@ async fn handle_key(
                 KeyCode::Esc => {
                     state.mode = Mode::ConnectionManager {
                         tab: ConnectionManagerTab::Connectors,
-                        cursor: 0,
+                        list: SelectList::new(),
                     };
                 }
                 KeyCode::Tab => {
@@ -1553,9 +1488,11 @@ async fn handle_key(
                                     Err(_) => {
                                         // Connection was added in Error state;
                                         // go to manager so user can see it and retry.
+                                        let mut list = SelectList::new();
+                                        list.cursor = conn_idx;
                                         state.mode = Mode::ConnectionManager {
                                             tab: ConnectionManagerTab::Connections,
-                                            cursor: conn_idx,
+                                            list,
                                         };
                                     }
                                 }
@@ -1578,23 +1515,19 @@ async fn handle_key(
         }
 
         // ── Manual list ──────────────────────────────────────────────────
-        Mode::ManualList { cursor } => {
+        Mode::ManualList { ref mut list } => {
             match key.code {
                 KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('m') => {
                     state.mode = Mode::Normal;
                 }
                 KeyCode::Up | KeyCode::Char('k') => {
-                    if cursor > 0 {
-                        state.mode = Mode::ManualList { cursor: cursor - 1 };
-                    }
+                    list.move_up();
                 }
                 KeyCode::Down | KeyCode::Char('j') => {
-                    if cursor + 1 < ui::render::MANUALS.len() {
-                        state.mode = Mode::ManualList { cursor: cursor + 1 };
-                    }
+                    list.move_down(ui::render::MANUALS.len());
                 }
                 KeyCode::Enter => {
-                    state.mode = Mode::ManualView { index: cursor, scroll: 0 };
+                    state.mode = Mode::ManualView { index: list.cursor, scroll: 0 };
                 }
                 _ => {}
             }
@@ -1605,7 +1538,9 @@ async fn handle_key(
             let line_count = ui::render::manual_line_count(index);
             match key.code {
                 KeyCode::Esc | KeyCode::Char('q') => {
-                    state.mode = Mode::ManualList { cursor: index };
+                    let mut list = SelectList::new();
+                    list.cursor = index;
+                    state.mode = Mode::ManualList { list };
                 }
                 KeyCode::Up | KeyCode::Char('k') => {
                     if scroll > 0 {
@@ -1669,8 +1604,7 @@ async fn execute_command(
                     state.paths = result.paths.clone();
                     state.paths_has_more = result.has_more;
                     state.paths_next_depth = result.next_depth;
-                    state.path_cursor = 0;
-                    state.mode = Mode::PathSelection;
+                    state.mode = Mode::PathSelection { list: SelectList::new() };
                     *pending_paths = Some((rule, result.paths));
                 }
             }
