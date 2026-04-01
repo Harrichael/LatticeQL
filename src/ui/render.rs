@@ -346,7 +346,7 @@ fn format_completions(completions: &[Completion]) -> String {
             Completion::QuotedValue => "'<value>'".to_string(),
         })
         .collect();
-    let mut text = format!(" {}", parts.join("  ·  "));
+    let mut text = parts.join("  ·  ");
     if total > MAX_SHOW {
         text.push_str(&format!("  +{} more", total - MAX_SHOW));
     }
