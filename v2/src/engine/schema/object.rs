@@ -4,22 +4,47 @@
 //!
 //! ```ignore
 //! let users = ObjectSchema::new("public", "users")
-//!     .with_attribute(Attribute::new("id"))
-//!     .with_attribute(Attribute::new("email"));
+//!     .with_attribute(Attribute::new("id", Type::new("BIGINT", Kind::Integer)))
+//!     .with_attribute(Attribute::new("email", Type::new("VARCHAR(255)", Kind::Text)));
 //!
 //! // Same object, two roles in one query.
 //! let author = users.clone().with_alias("author");
 //! let reviewer = users.with_alias("reviewer");
 //! ```
 
+// Two views on an attribute's type travel together: `source` is the raw
+// label from the originating system, preserved verbatim so it can be shown
+// to the user; `kind` is our normalized category that general logic
+// (compatibility checks, pathfinding) can reason over without knowing the
+// source vocabulary.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Type {
+    pub source: String,
+    pub kind: Kind,
+}
+
+impl Type {
+    pub fn new(source: impl Into<String>, kind: Kind) -> Self {
+        Self { source: source.into(), kind }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum Kind {
+    Integer,
+    Text,
+    Other,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Attribute {
     pub name: String,
+    pub ty: Type,
 }
 
 impl Attribute {
-    pub fn new(name: impl Into<String>) -> Self {
-        Self { name: name.into() }
+    pub fn new(name: impl Into<String>, ty: Type) -> Self {
+        Self { name: name.into(), ty }
     }
 }
 

@@ -40,6 +40,8 @@
   force restructuring the data, or just adding a method? If restructure,
   the shape is wrong.
 - As we build, flag architecture issues and concerns early and not later.
+- Pre-mature abstraction is very deadly to architecture just as pre-mature
+  optimization is deadly to benchmarking.
 
 ## Rust
 
