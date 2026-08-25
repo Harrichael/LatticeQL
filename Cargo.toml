@@ -7,6 +7,12 @@ version = "0.1.0"
 edition = "2021"
 description = "Navigate complex datasets from multiple sources intuitively in a unified query interface"
 
+# The CLI is `lql`. Without this the binary would inherit the package name, and
+# `latticeql` is too long to type for something used interactively.
+[[bin]]
+name = "lql"
+path = "src/main.rs"
+
 [dependencies]
 ratatui = "0.29"
 crossterm = "0.28"
