@@ -1,5 +1,5 @@
 [workspace]
-members = ["v2","xtask"]
+members = ["xtask"]
 
 [package]
 name = "latticeql"
